@@ -39,6 +39,11 @@ When changing behavior, update or add a test alongside the change first —
 the test suite is the source of truth for the extension's contract, and
 doubles as documentation of it.
 
+Also update `CONTEXT.md` (design rationale) and this file's "Known
+limitations" section in the *same commit* if the change affects either —
+see the repo root `AGENTS.md`'s "Keeping documentation in sync" section.
+Don't leave that for a follow-up commit.
+
 For a real end-to-end sanity check (exercising the actual `pi` binary
 rather than the fake harness), you can still run `pi` in a session with this
 extension loaded and `/reload` after edits, but that's a supplement to the

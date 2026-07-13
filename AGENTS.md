@@ -65,7 +65,9 @@ When asked to create a new extension, do this in order:
 7. Optionally sanity-check against the real `pi` binary (a session with
    the extension loaded, `/reload` after edits) — a supplement to the test
    suite, never a replacement for it.
-8. Commit. There's currently no branch protection and the convention is
+8. **Update docs in the same commit, not as a follow-up** — see
+   "Keeping documentation in sync" below.
+9. Commit. There's currently no branch protection and the convention is
    committing directly to `master` — don't invent a PR workflow unless
    asked.
 
@@ -147,6 +149,31 @@ template:
   alternatives that were considered and rejected. Write this so a future
   agent (or you, months later) doesn't have to re-derive decisions that
   were already deliberately made.
+
+## Keeping documentation in sync
+
+Stale `AGENTS.md`/`CONTEXT.md`/`README.md` is worse than no docs at all —
+it actively misleads whoever (human or agent) reads it next. Treat doc
+drift as a bug, not a low-priority cleanup task.
+
+**Rule: if a commit changes behavior, scope, allowed roots, defaults, or
+any other decision a doc file describes, the doc update is part of that
+same commit — never a separate follow-up.** Concretely, before committing:
+
+- Changed what an extension does or how it decides something? Update that
+  extension's `CONTEXT.md` (design rationale) and, if it closes or
+  introduces a known limitation, its `AGENTS.md`.
+- Changed a repo-wide convention (folder layout, test approach, dependency
+  rules, registration mechanism)? Update this file (root `AGENTS.md`).
+- Changed user-facing setup/usage (new task, new setup step, new
+  requirement)? Update `README.md`.
+- Added an example, command, or claim to a doc file that a test doesn't
+  actually cover? Either add the test or don't make the claim — docs
+  should describe verified behavior, not aspirational behavior.
+
+When reviewing someone else's (or your own past) change without an
+accompanying doc update, treat that as an incomplete change, not an
+acceptable one — call it out and fix it before/alongside merging.
 
 ## Design philosophy to carry into new extensions
 
