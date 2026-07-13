@@ -22,18 +22,27 @@ and everyday shell use completely untouched.
 
 ## Testing changes
 
-There's no test harness yet. To verify changes manually:
+`mise run test` (from the repo root) runs the behavioral test suite in
+`index.test.ts` via Bun's built-in test runner. It exercises the extension's
+`tool_call` and `before_agent_start` handlers directly (via
+`../test-utils/harness.ts`), covering every category below:
 
-1. Edit `index.ts`.
-2. Run `pi` in a session that has this extension loaded (see repo root
-   `README.md` for how it's registered via `settings.json`).
-3. `/reload` to pick up changes without restarting.
-4. Try commands from each category below and confirm the expected outcome:
-   - Safe: `rm -rf ./some-tmp-dir` inside an allowed root → runs, no prompt.
-   - Escalated: `rm -rf /tmp/whatever` (outside allowed roots) → confirm prompt.
-   - Ambiguous: `cd /tmp && rm -rf foo`, `rm -rf "$SOME_VAR"` → confirm prompt.
-   - Always-blocked: a fork bomb string, `dd if=/dev/zero of=/dev/sda` → hard
-     block, no prompt at all.
+- Safe: destructive commands inside an allowed root → run, no prompt.
+- Escalated: destructive commands outside allowed roots → confirm prompt;
+  approved runs, declined or no-UI blocks.
+- Ambiguous: shell variables, command substitution, globs, a preceding `cd`,
+  `xargs`-piped deletion → treated as unsafe, fails closed.
+- Always-blocked: fork bombs, `mkfs`, `dd ... of=/dev/*`, etc. → hard block,
+  no prompt at all, even inside an allowed root.
+
+When changing behavior, update or add a test alongside the change first —
+the test suite is the source of truth for the extension's contract, and
+doubles as documentation of it.
+
+For a real end-to-end sanity check (exercising the actual `pi` binary
+rather than the fake harness), you can still run `pi` in a session with this
+extension loaded and `/reload` after edits, but that's a supplement to the
+test suite, not a replacement for it.
 
 ## Known limitations (don't try to "fix" these without discussion)
 

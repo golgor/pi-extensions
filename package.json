@@ -1,0 +1,7 @@
+{
+  "name": "pi-extensions",
+  "private": true,
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.80.6"
+  }
+}

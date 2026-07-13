@@ -15,6 +15,21 @@ safe to rerun any time, only adds missing entries, never deletes anything.
 Requires [mise](https://mise.jdx.dev/) (pins the Python version used by the
 setup script) and Pi itself already installed. No other dependencies.
 
+## Tests
+
+```bash
+mise run test
+```
+
+Runs `bun install && bun test` (mise pins the `bun` version too). Bun's
+built-in test runner (`bun:test`, Jest-compatible API) auto-discovers every
+`*.test.ts` file in the repo, so tests live colocated with the extension
+they cover (e.g. `fs-guard/index.test.ts`) and double as behavior docs.
+
+The only dependency, `@earendil-works/pi-coding-agent`, is a `devDependency`
+used for types and to exercise extension code in tests — at real runtime,
+Pi itself provides this module; extensions in this repo never bundle it.
+
 ## Extensions
 
 - [`fs-guard/`](./fs-guard) — gates irrecoverable destructive `bash` commands
