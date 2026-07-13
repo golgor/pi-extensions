@@ -26,6 +26,17 @@ wrong path. That's the only threat this extension addresses.
   `~/Code/Personal`. Everything under these is git-tracked and recoverable,
   so destructive commands there run with zero friction — the whole point is
   to not get in the way of normal agent work.
+- **cwd is trusted *unless* it's too broad**: discovered via real testing —
+  launching Pi directly from `$HOME` made the entire home directory
+  (`~/.ssh`, `~/.aws`, everything) a trusted root for that session, since
+  "the launch cwd" was unconditionally added to `ALLOWED_ROOTS`. That's
+  close to the exact scenario this extension exists to catch. Fix: cwd is
+  excluded from the trusted roots specifically when it resolves to `$HOME`
+  or the filesystem root (`isTooBroadToTrust`). Any other specific working
+  directory (e.g. `/tmp/some-project`) is still fully trusted, same as
+  before — this was a deliberate, narrow carve-out, not a general
+  "cwd must be under $HOME" restriction (that would have broken legitimate
+  work in directories outside the home tree).
 - **Two tiers of gating**:
   1. A short, fixed list of *always-catastrophic* patterns (fork bombs,
      `mkfs`, `dd ... of=/dev/*`, `wipefs`, writing to raw block devices,

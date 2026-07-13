@@ -77,6 +77,28 @@ describe("fs-guard: allowed roots run with zero friction", () => {
 	});
 });
 
+describe("fs-guard: cwd is only trusted when it isn't too broad", () => {
+	test("a destructive command is gated when cwd is exactly $HOME", async () => {
+		const result = await callToolCall("rm -rf ./test-file.md", { cwd: HOME, hasUI: false });
+		expect(result).toMatchObject({ block: true });
+	});
+
+	test("a destructive command is gated when cwd is the filesystem root", async () => {
+		const result = await callToolCall("rm -rf ./whatever", { cwd: "/", hasUI: false });
+		expect(result).toMatchObject({ block: true });
+	});
+
+	test("a non-$HOME, non-root cwd is still fully trusted", async () => {
+		const result = await callToolCall("rm -rf ./scratch", { cwd: "/tmp/fs-guard-test" });
+		expect(result).toBeUndefined();
+	});
+
+	test("~/Code/Work and ~/Code/Personal stay trusted even when cwd is $HOME", async () => {
+		const result = await callToolCall(`rm -rf ${HOME}/Code/Work/some-project/build`, { cwd: HOME, hasUI: false });
+		expect(result).toBeUndefined();
+	});
+});
+
 describe("fs-guard: destructive commands outside allowed roots are gated", () => {
 	test("blocked outright when no UI is available to confirm", async () => {
 		const result = await callToolCall("rm -rf /var/tmp/outside", { cwd: "/tmp/fs-guard-test", hasUI: false });

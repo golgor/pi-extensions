@@ -6,7 +6,9 @@
  *   - Only inspects the `bash` tool. `read` / `write` / `edit` and user-typed
  *     `!` commands are completely untouched.
  *   - "Full access, no friction" inside ALLOWED_ROOTS: the cwd Pi was
- *     started in, plus ~/Code/Work and ~/Code/Personal.
+ *     started in, plus ~/Code/Work and ~/Code/Personal. Exception: if cwd
+ *     is exactly $HOME or the filesystem root, it's too broad to auto-trust
+ *     and is excluded (see isTooBroadToTrust).
  *   - Outside those roots (or when a target can't be confidently resolved),
  *     destructive commands are gated behind a confirmation prompt, and
  *     fail closed (blocked) when no UI is available to ask, or the user
@@ -20,15 +22,28 @@
  */
 
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { isAbsolute, join, parse, resolve, sep } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
 
 const HOME = homedir();
 
 // Roots outside the launch cwd that get full, unrestricted bash access.
-// The cwd Pi was started in is added dynamically per-call (ctx.cwd).
+// The cwd Pi was started in is added dynamically per-call (ctx.cwd), unless
+// it's too broad to auto-trust (see isTooBroadToTrust).
 const STATIC_ALLOWED_ROOTS = [join(HOME, "Code", "Work"), join(HOME, "Code", "Personal")];
+
+/**
+ * Some cwd values are too broad to safely auto-trust, even though "the cwd
+ * Pi was launched in" is otherwise always a trusted root. Launching Pi
+ * directly from $HOME or the filesystem root would otherwise grant
+ * unrestricted destructive-command access to effectively everything under
+ * it. Any other specific working directory (e.g. /tmp/some-project) is
+ * still trusted as before.
+ */
+function isTooBroadToTrust(resolvedCwd: string): boolean {
+	return resolvedCwd === HOME || resolvedCwd === parse(resolvedCwd).root;
+}
 
 // Commands that are always blocked outright, regardless of target path.
 // No confirmation is offered for these — they're catastrophic in
@@ -258,7 +273,8 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 
-		const allowedRoots = [resolve(ctx.cwd), ...STATIC_ALLOWED_ROOTS];
+		const resolvedCwd = resolve(ctx.cwd);
+		const allowedRoots = isTooBroadToTrust(resolvedCwd) ? [...STATIC_ALLOWED_ROOTS] : [resolvedCwd, ...STATIC_ALLOWED_ROOTS];
 		const escalation = evaluateCommandForEscalation(command, ctx.cwd, allowedRoots);
 		if (!escalation) return; // fully inside allowed roots, no friction
 
