@@ -1,0 +1,6 @@
+[tools]
+python = "3.12"
+
+[tasks.setup]
+description = "Register all extensions in this repo with Pi's global settings.json"
+run = "python3 scripts/install_extensions.py"
