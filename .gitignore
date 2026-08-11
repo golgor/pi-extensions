@@ -1,3 +1,4 @@
 __pycache__/
+.pi-subagents/*
 *.pyc
 node_modules/
