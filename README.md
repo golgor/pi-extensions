@@ -36,6 +36,11 @@ Pi itself provides this module; extensions in this repo never bundle it.
   (e.g. `rm -rf /`-style mistakes) outside `~/Code/Work`, `~/Code/Personal`,
   and the current working directory. See `fs-guard/CONTEXT.md` for the design
   rationale and `fs-guard/AGENTS.md` for extension-specific dev notes.
+- [`wayfinder-map/`](./wayfinder-map) — `/map` renders the current repo's
+  wayfinder map (GitHub-issues tracker: `wayfinder:map` issue + sub-issues)
+  as a browser star-map, served on loopback. Frontend vendored from
+  [rengwu/wayfinder-maps](https://github.com/rengwu/wayfinder-maps) (MIT).
+  See `wayfinder-map/CONTEXT.md` for design decisions and limitations.
 
 ## Adding a new extension
 

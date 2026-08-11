@@ -26,28 +26,55 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 // biome-ignore lint/suspicious/noExplicitAny: handlers accept whatever event/result shape their event type uses
 type AnyHandler = (event: any, ctx: ExtensionContext) => unknown | Promise<unknown>;
 
+// biome-ignore lint/suspicious/noExplicitAny: command handlers accept whatever ctx shape the command needs
+type AnyCommandHandler = (args: string, ctx: any) => unknown | Promise<unknown>;
+
 export interface MountedExtension {
 	/** Event handlers registered by the extension, keyed by event name. */
 	handlers: Record<string, AnyHandler>;
+	/** Slash-command handlers registered via `pi.registerCommand`, keyed by name. */
+	commands: Record<string, AnyCommandHandler>;
 }
 
 /**
  * Runs an extension's factory function against a fake ExtensionAPI that
- * only implements `pi.on(...)`. Sufficient for extensions (like fs-guard)
- * that don't register tools/commands/shortcuts. Extend this if a future
- * extension under test also needs those.
+ * implements `pi.on(...)` and `pi.registerCommand(...)`. Pass `extras` to
+ * supply further ExtensionAPI members an extension under test calls (e.g. a
+ * fake `exec` for extensions that shell out). Extend this if a future
+ * extension under test needs yet more.
  */
-export async function mountExtension(factory: (pi: ExtensionAPI) => void | Promise<void>): Promise<MountedExtension> {
+export async function mountExtension(
+	factory: (pi: ExtensionAPI) => void | Promise<void>,
+	extras: Partial<ExtensionAPI> = {},
+): Promise<MountedExtension> {
 	const handlers: Record<string, AnyHandler> = {};
+	const commands: Record<string, AnyCommandHandler> = {};
 
 	const fakePi = {
 		on(event: string, handler: AnyHandler) {
 			handlers[event] = handler;
 		},
+		registerCommand(name: string, options: { handler: AnyCommandHandler }) {
+			commands[name] = options.handler;
+		},
+		...extras,
 	} as unknown as ExtensionAPI;
 
 	await factory(fakePi);
-	return { handlers };
+	return { handlers, commands };
+}
+
+/** Builds a fake `pi.exec` from a matcher: return stdout for a given command+args, or throw/undefined. */
+export function makeExec(
+	respond: (command: string, args: string[]) => string | undefined,
+): ExtensionAPI["exec"] {
+	return (async (command: string, args: string[]) => {
+		const stdout = respond(command, args);
+		if (stdout === undefined) {
+			return { stdout: "", stderr: `no fixture for: ${command} ${args.join(" ")}`, code: 1, killed: false };
+		}
+		return { stdout, stderr: "", code: 0, killed: false };
+	}) as ExtensionAPI["exec"];
 }
 
 /** Builds a synthetic `tool_call` event for the `bash` tool. */
