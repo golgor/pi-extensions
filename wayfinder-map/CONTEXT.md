@@ -55,6 +55,7 @@ this extension only implements the JSON API the frontend already speaks:
   — ~2s on a 22-ticket map). Switch to a single GraphQL query if maps get big.
 - The loading overlay and favicon 204 are served-time additions in `index.ts`;
   `web/` remains byte-identical to upstream.
-- The viewer's "Open another folder" buttons dead-end (stub endpoints) — one
-  map per `/map` invocation.
+- One map per `/map` invocation: the "← Maps" button and the splash/maplist
+  screens are hidden via injected CSS (they would dead-end on stub endpoints;
+  folder picking makes no sense against GitHub).
 - Linux-only browser open (`xdg-open`).

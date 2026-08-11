@@ -25,8 +25,13 @@ const WEB_DIR = fileURLToPath(new URL("./web", import.meta.url));
  * see CONTEXT.md). Shows a loading label until the first /api/graph settles;
  * the inline classic script runs before the frontend's deferred module
  * scripts, so the fetch hook is in place before any request is made.
+ *
+ * The CSS rule hides the "← Maps" button and the splash/maplist screens: this
+ * extension serves exactly one map per /map invocation, and those screens
+ * dead-end on stub endpoints (folder picking makes no sense against GitHub).
  */
-const LOADING_OVERLAY = `<div id="wfm-loading" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#c8ccd6;font:14px system-ui;pointer-events:none;z-index:99">Fetching map from GitHub…</div>
+const LOADING_OVERLAY = `<style>#backbtn,#splash,#maplist{display:none !important}</style>
+<div id="wfm-loading" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#c8ccd6;font:14px system-ui;pointer-events:none;z-index:99">Fetching map from GitHub…</div>
 <script>(function(){
   var f = window.fetch;
   window.fetch = function(input){

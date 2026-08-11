@@ -160,6 +160,8 @@ describe("wayfinder-map: /map command and server plumbing", () => {
 		expect(html).toContain("<canvas");
 		// loading overlay is injected at serve time; the vendored file stays verbatim
 		expect(html).toContain("wfm-loading");
+		// the "← Maps" button and the splash/maplist screens are hidden — one map per /map
+		expect(html).toContain("#backbtn,#splash,#maplist{display:none");
 	});
 
 	test("/favicon.ico answers 204, not 404", async () => {
