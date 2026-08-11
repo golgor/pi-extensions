@@ -20,6 +20,26 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 
 const WEB_DIR = fileURLToPath(new URL("./web", import.meta.url));
 
+/**
+ * Injected into the vendored index.html at serve time (web/ stays verbatim —
+ * see CONTEXT.md). Shows a loading label until the first /api/graph settles;
+ * the inline classic script runs before the frontend's deferred module
+ * scripts, so the fetch hook is in place before any request is made.
+ */
+const LOADING_OVERLAY = `<div id="wfm-loading" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#c8ccd6;font:14px system-ui;pointer-events:none;z-index:99">Fetching map from GitHub…</div>
+<script>(function(){
+  var f = window.fetch;
+  window.fetch = function(input){
+    var p = f.apply(this, arguments);
+    var url = typeof input === "string" ? input : (input && input.url) || "";
+    if (url.indexOf("/api/graph") !== -1) p.then(function(r){
+      var e = document.getElementById("wfm-loading"); if (!e) return;
+      if (r.ok) e.remove(); else e.textContent = "Map fetch failed (HTTP " + r.status + ") — see devtools network tab";
+    }, function(){ var e = document.getElementById("wfm-loading"); if (e) e.textContent = "Map fetch failed — see devtools network tab"; });
+    return p;
+  };
+})();</script>`;
+
 const MIME: Record<string, string> = {
 	".html": "text/html; charset=utf-8",
 	".css": "text/css; charset=utf-8",
@@ -209,15 +229,17 @@ export default function (pi: ExtensionAPI) {
 		// per_page goes in the path: `gh api -F` would switch the request to POST
 		const children: GhIssue[] = JSON.parse(await gh(["api", `repos/${repo}/issues/${effort}/sub_issues?per_page=100`]));
 		const blockersOf: Record<number, { number: number; state: string }[]> = {};
-		// ponytail: N+1 gh calls, one per child — single GraphQL query if maps get big
-		for (const c of children) {
-			try {
-				const deps: GhIssue[] = JSON.parse(await gh(["api", `repos/${repo}/issues/${c.number}/dependencies/blocked_by?per_page=100`]));
-				blockersOf[c.number] = deps.map((d) => ({ number: d.number, state: d.state }));
-			} catch {
-				blockersOf[c.number] = []; // buildGraphDoc falls back to the body line
-			}
-		}
+		// ponytail: N+1 gh calls, one per child (in parallel) — single GraphQL query if maps get big
+		await Promise.all(
+			children.map(async (c) => {
+				try {
+					const deps: GhIssue[] = JSON.parse(await gh(["api", `repos/${repo}/issues/${c.number}/dependencies/blocked_by?per_page=100`]));
+					blockersOf[c.number] = deps.map((d) => ({ number: d.number, state: d.state }));
+				} catch {
+					blockersOf[c.number] = []; // buildGraphDoc falls back to the body line
+				}
+			}),
+		);
 		return buildGraphDoc(map, children, blockersOf);
 	}
 
@@ -240,11 +262,18 @@ export default function (pi: ExtensionAPI) {
 					if (path === "/api/pick") return json({});
 					if (path === "/api/maps" || path === "/api/recents") return json([]);
 					if (path.startsWith("/api/")) return json({});
+					if (path === "/favicon.ico") {
+						res.writeHead(204);
+						return res.end();
+					}
 					// static files from the vendored web/
 					const rel = path === "/" ? "index.html" : normalize(path).replace(/^[/\\]+/, "");
 					if (rel.split(/[/\\]/).includes("..")) return send(403, "text/plain", "forbidden");
 					try {
 						const data = await readFile(join(WEB_DIR, rel));
+						if (rel === "index.html") {
+							return send(200, MIME[".html"], data.toString().replace("</body>", `${LOADING_OVERLAY}\n</body>`));
+						}
 						return send(200, MIME[extname(rel)] ?? "application/octet-stream", data);
 					} catch {
 						return send(404, "text/plain", "not found");

@@ -156,7 +156,18 @@ describe("wayfinder-map: /map command and server plumbing", () => {
 		const res = await get(`${baseUrl}/`);
 		expect(res.status).toBe(200);
 		expect(res.headers.get("content-type")).toContain("text/html");
-		expect(await res.text()).toContain("<canvas");
+		const html = await res.text();
+		expect(html).toContain("<canvas");
+		// loading overlay is injected at serve time; the vendored file stays verbatim
+		expect(html).toContain("wfm-loading");
+	});
+
+	test("/favicon.ico answers 204, not 404", async () => {
+		const { mounted, baseUrl } = await openMap();
+		shutdown = () => mounted.handlers.session_shutdown?.({} as never, {} as never);
+
+		const res = await get(`${baseUrl}/favicon.ico`);
+		expect(res.status).toBe(204);
 	});
 
 	test("/api/initial names the chosen map; /api/version is constant", async () => {
