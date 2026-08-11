@@ -206,12 +206,13 @@ export default function (pi: ExtensionAPI) {
 		const repo = JSON.parse(await gh(["repo", "view", "--json", "nameWithOwner"])).nameWithOwner as string;
 		const map: GhIssue = JSON.parse(await gh(["api", `repos/${repo}/issues/${effort}`]));
 		// ponytail: per_page=100, no pagination — paginate if a map outgrows 100 tickets
-		const children: GhIssue[] = JSON.parse(await gh(["api", `repos/${repo}/issues/${effort}/sub_issues`, "-F", "per_page=100"]));
+		// per_page goes in the path: `gh api -F` would switch the request to POST
+		const children: GhIssue[] = JSON.parse(await gh(["api", `repos/${repo}/issues/${effort}/sub_issues?per_page=100`]));
 		const blockersOf: Record<number, { number: number; state: string }[]> = {};
 		// ponytail: N+1 gh calls, one per child — single GraphQL query if maps get big
 		for (const c of children) {
 			try {
-				const deps: GhIssue[] = JSON.parse(await gh(["api", `repos/${repo}/issues/${c.number}/dependencies/blocked_by`, "-F", "per_page=100"]));
+				const deps: GhIssue[] = JSON.parse(await gh(["api", `repos/${repo}/issues/${c.number}/dependencies/blocked_by?per_page=100`]));
 				blockersOf[c.number] = deps.map((d) => ({ number: d.number, state: d.state }));
 			} catch {
 				blockersOf[c.number] = []; // buildGraphDoc falls back to the body line

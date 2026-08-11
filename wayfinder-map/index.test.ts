@@ -101,10 +101,13 @@ function makeGhExec(openedUrls: string[], maps = [{ number: 1, title: "My Map" }
 		if (args[0] === "issue" && args[1] === "list") return JSON.stringify(maps);
 		if (args[0] === "repo" && args[1] === "view") return JSON.stringify({ nameWithOwner: "o/r" });
 		if (args[0] === "api") {
+			// Real `gh api -F ...` switches the request to POST (a live bug once shipped
+			// this way) — query params must ride in the path, so reject -F outright.
+			if (args.includes("-F")) return undefined;
 			const path = args[1];
 			if (path === "repos/o/r/issues/1") return JSON.stringify(MAP_ISSUE);
-			if (path === "repos/o/r/issues/1/sub_issues") return JSON.stringify(CHILDREN);
-			const dep = path.match(/^repos\/o\/r\/issues\/(\d+)\/dependencies\/blocked_by$/);
+			if (path === "repos/o/r/issues/1/sub_issues?per_page=100") return JSON.stringify(CHILDREN);
+			const dep = path.match(/^repos\/o\/r\/issues\/(\d+)\/dependencies\/blocked_by\?per_page=100$/);
 			if (dep) {
 				const blockers = BLOCKERS[Number(dep[1])];
 				return blockers === undefined ? undefined : JSON.stringify(blockers);
