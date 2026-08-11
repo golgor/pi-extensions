@@ -51,8 +51,10 @@ this extension only implements the JSON API the frontend already speaks:
 
 - Sub-issues API assumed enabled; the task-list fallback for map children is
   not implemented.
-- N+1 `gh` calls for edges (one per child). Fine at tens of tickets; switch
-  to a single GraphQL query if maps get big.
+- N+1 `gh` calls for edges (one per child, run in parallel via `Promise.all`
+  — ~2s on a 22-ticket map). Switch to a single GraphQL query if maps get big.
+- The loading overlay and favicon 204 are served-time additions in `index.ts`;
+  `web/` remains byte-identical to upstream.
 - The viewer's "Open another folder" buttons dead-end (stub endpoints) — one
   map per `/map` invocation.
 - Linux-only browser open (`xdg-open`).
