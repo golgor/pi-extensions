@@ -24,7 +24,7 @@ const MAP_BODY = [
 	"- something already decided",
 ].join("\n");
 
-const MAP_ISSUE = { number: 1, title: "My Map", state: "open", body: MAP_BODY };
+const MAP_ISSUE = { number: 1, title: "My Map", state: "open", body: MAP_BODY, html_url: "https://github.com/o/r/issues/1" };
 
 // One child per status in the derivation table, plus the body-line fallback:
 //   #10 closed+completed            -> resolved
@@ -255,6 +255,7 @@ describe("wayfinder-map: /api/graph derivation", () => {
 		const g = await fetchGraph();
 		expect(g.name).toBe("My Map");
 		expect(g.destination).toBe("A spec for the timeline feature.");
+		expect(g.url).toBe("https://github.com/o/r/issues/1"); // consumed by the injected HUD-link script
 		expect(g.fog).toEqual([
 			{ title: "Today's row", clearsWith: 13 },
 			{ title: "Error states", clearsWith: 0 },

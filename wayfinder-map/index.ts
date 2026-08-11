@@ -29,8 +29,15 @@ const WEB_DIR = fileURLToPath(new URL("./web", import.meta.url));
  * The CSS rule hides the "← Maps" button and the splash/maplist screens: this
  * extension serves exactly one map per /map invocation, and those screens
  * dead-end on stub endpoints (folder picking makes no sense against GitHub).
+ *
+ * The MutationObserver links the HUD title to the map's GitHub issue (the
+ * graphDoc carries its html_url as `url`, which the vendored HUD ignores);
+ * the HUD is rebuilt on every graph update, so the link is re-applied on each
+ * rebuild rather than set once.
  */
-const LOADING_OVERLAY = `<style>#backbtn,#splash,#maplist{display:none !important}</style>
+const LOADING_OVERLAY = `<style>#backbtn,#splash,#maplist{display:none !important}
+#hud .htitle h1 a{color:inherit;text-decoration:none}
+#hud .htitle h1 a:hover{text-decoration:underline}</style>
 <div id="wfm-loading" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#c8ccd6;font:14px system-ui;pointer-events:none;z-index:99">Fetching map from GitHub…</div>
 <script>(function(){
   var f = window.fetch;
@@ -38,11 +45,21 @@ const LOADING_OVERLAY = `<style>#backbtn,#splash,#maplist{display:none !importan
     var p = f.apply(this, arguments);
     var url = typeof input === "string" ? input : (input && input.url) || "";
     if (url.indexOf("/api/graph") !== -1) p.then(function(r){
+      if (r.ok) r.clone().json().then(function(g){ window.wfmMapUrl = g.url || ""; linkHudTitle(); }, function(){});
       var e = document.getElementById("wfm-loading"); if (!e) return;
       if (r.ok) e.remove(); else e.textContent = "Map fetch failed (HTTP " + r.status + ") — see devtools network tab";
     }, function(){ var e = document.getElementById("wfm-loading"); if (e) e.textContent = "Map fetch failed — see devtools network tab"; });
     return p;
   };
+  function linkHudTitle(){
+    var h1 = document.querySelector("#hud .htitle h1");
+    if (!h1 || !window.wfmMapUrl || h1.querySelector("a")) return;
+    var a = document.createElement("a");
+    a.href = window.wfmMapUrl; a.target = "_blank"; a.rel = "noopener";
+    a.textContent = h1.textContent; a.title = window.wfmMapUrl;
+    h1.textContent = ""; h1.appendChild(a);
+  }
+  new MutationObserver(linkHudTitle).observe(document.getElementById("hud"), { childList: true });
 })();</script>`;
 
 const MIME: Record<string, string> = {
@@ -58,6 +75,7 @@ const MIME: Record<string, string> = {
 interface GhIssue {
 	number: number;
 	title: string;
+	html_url?: string;
 	state: string; // "open" | "closed" (REST lowercases)
 	state_reason?: string | null; // "completed" | "not_planned" | ...
 	body?: string | null;
@@ -81,6 +99,8 @@ interface NodeDoc {
 
 interface GraphDoc {
 	name: string;
+	/** The map issue's html_url — not read by the vendored frontend; consumed by the injected HUD-link script. */
+	url: string;
 	destination: string;
 	counts: { resolved: number; claimed: number; open: number; outOfScope: number; total: number };
 	nodes: NodeDoc[];
@@ -204,6 +224,7 @@ function buildGraphDoc(
 
 	return {
 		name: map.title,
+		url: map.html_url ?? "",
 		destination: sectionOf(map.body ?? "", "Destination"),
 		counts,
 		nodes,
