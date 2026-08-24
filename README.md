@@ -34,7 +34,7 @@ Pi itself provides this module; extensions in this repo never bundle it.
 
 - [`fs-guard/`](./fs-guard) — gates irrecoverable destructive `bash` commands
   (e.g. `rm -rf /`-style mistakes) outside `~/Code/Work`, `~/Code/Personal`,
-  and the current working directory. See `fs-guard/CONTEXT.md` for the design
+  `/tmp`, and the current working directory. See `fs-guard/CONTEXT.md` for the design
   rationale and `fs-guard/AGENTS.md` for extension-specific dev notes.
 - [`wayfinder-map/`](./wayfinder-map) — `/map` renders the current repo's
   wayfinder map (GitHub-issues tracker: `wayfinder:map` issue + sub-issues)
