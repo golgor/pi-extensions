@@ -71,6 +71,32 @@ describe("fs-guard: allowed roots run with zero friction", () => {
 		expect(result).toBeUndefined();
 	});
 
+	test("deletions under /tmp are allowed regardless of cwd", async () => {
+		const result = await callToolCall("rm -rf /tmp/some-scratch-dir", { cwd: `${HOME}/Code/Work/proj` });
+		expect(result).toBeUndefined();
+	});
+
+	test("/tmp stays trusted even when cwd is $HOME", async () => {
+		const result = await callToolCall("rm -rf /tmp/some-scratch-dir", { cwd: HOME, hasUI: false });
+		expect(result).toBeUndefined();
+	});
+
+	test("deleting a protected root itself is gated", async () => {
+		const result = await callToolCall("rm -rf /tmp", { cwd: "/tmp/fs-guard-test", hasUI: false });
+		expect(result).toMatchObject({ block: true });
+		expect((result as { reason: string }).reason).toContain("itself");
+	});
+
+	test("deleting the launch cwd itself is gated", async () => {
+		const result = await callToolCall("rm -rf .", { cwd: "/tmp/fs-guard-test", hasUI: false });
+		expect(result).toMatchObject({ block: true });
+	});
+
+	test("find -delete on a protected root itself is gated", async () => {
+		const result = await callToolCall("find /tmp -name '*.log' -delete", { cwd: "/tmp/fs-guard-test", hasUI: false });
+		expect(result).toMatchObject({ block: true });
+	});
+
 	test("non-destructive commands are always left untouched", async () => {
 		const result = await callToolCall("ls -la /etc", { cwd: "/tmp" });
 		expect(result).toBeUndefined();

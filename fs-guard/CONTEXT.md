@@ -22,10 +22,24 @@ wrong path. That's the only threat this extension addresses.
 
 ## Design decisions and why
 
-- **Allowed roots**: the cwd Pi was launched in, plus `~/Code/Work` and
-  `~/Code/Personal`. Everything under these is git-tracked and recoverable,
-  so destructive commands there run with zero friction — the whole point is
-  to not get in the way of normal agent work.
+- **Allowed roots**: the cwd Pi was launched in, plus `~/Code/Work`,
+  `~/Code/Personal` and `/tmp`. Everything under the `~/Code` roots is
+  git-tracked and recoverable, so destructive commands there run with zero
+  friction — the whole point is to not get in the way of normal agent work.
+- **`/tmp` is a trusted root** (added after the fact): scratch dirs, build
+  output and test fixtures under `/tmp` are throwaway by definition, so
+  gating them was pure false-positive friction with no recoverability
+  benefit. Accepted trade-off: `/tmp` is world-writable and may hold other
+  processes' state, so a stray deletion there can still break something
+  running — judged acceptable for a directory the OS clears on reboot.
+- **A protected root is a container, not a target**: deleting *inside* a
+  root is free, deleting the root directory *itself* (`rm -rf /tmp`,
+  `rm -rf ~/Code/Work`, `rm -rf .` at the launch cwd) is escalated. Trusting
+  a root means trusting work that happens in it, not the removal of the
+  workspace. `git clean` is exempt: it empties its target but leaves the
+  directory in place, so `git clean -fdx` in the project root stays
+  friction-free. `find ... -delete` is *not* exempt — it does remove its
+  search root.
 - **cwd is trusted *unless* it's too broad**: discovered via real testing —
   launching Pi directly from `$HOME` made the entire home directory
   (`~/.ssh`, `~/.aws`, everything) a trusted root for that session, since
@@ -59,10 +73,15 @@ wrong path. That's the only threat this extension addresses.
   there's nobody to approve an escalated command, and unattended runs are
   precisely where an unnoticed catastrophic command is most dangerous. So
   "can't ask" is treated as "denied," not "allowed."
-- **System prompt note**: a short reminder is appended in `before_agent_start`
-  telling the agent to prefer literal paths for destructive commands. This
-  exists purely to reduce false-positive friction (the agent using a
-  variable when a literal path would do), not as a security control.
+- **System prompt note**: appended in `before_agent_start`. It leads with
+  the allowed pattern: literal absolute paths under a protected root,
+  including a named child of `/tmp`. One example recommends deleting a
+  containing directory over using variables, globs, or a `cd`-chained
+  command. It then briefly notes that roots themselves are not deletion
+  targets and other or ambiguous paths require confirmation. This exists
+  purely to reduce false-positive friction, not as a security control — an
+  agent is free to ignore it, and the `tool_call` gate is what actually
+  enforces anything.
 
 ## Alternatives considered and rejected
 

@@ -28,6 +28,8 @@ and everyday shell use completely untouched.
 `../test-utils/harness.ts`), covering every category below:
 
 - Safe: destructive commands inside an allowed root → run, no prompt.
+- Root itself: deleting an allowed root rather than something inside it
+  (`rm -rf /tmp`, `find /tmp ... -delete`) → escalated; `git clean` exempt.
 - Escalated: destructive commands outside allowed roots → confirm prompt;
   approved runs, declined or no-UI blocks.
 - Ambiguous: shell variables, command substitution, globs, a preceding `cd`,

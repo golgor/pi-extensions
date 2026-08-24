@@ -6,10 +6,11 @@
  *   - Only inspects the `bash` tool. `read` / `write` / `edit` and user-typed
  *     `!` commands are completely untouched.
  *   - "Full access, no friction" inside ALLOWED_ROOTS: the cwd Pi was
- *     started in, plus ~/Code/Work and ~/Code/Personal. Exception: if cwd
+ *     started in, plus ~/Code/Work, ~/Code/Personal and /tmp. Exception: if cwd
  *     is exactly $HOME or the filesystem root, it's too broad to auto-trust
  *     and is excluded (see isTooBroadToTrust).
- *   - Outside those roots (or when a target can't be confidently resolved),
+ *   - Outside those roots (or when a target can't be confidently resolved,
+ *     or when the target *is* one of the roots itself),
  *     destructive commands are gated behind a confirmation prompt, and
  *     fail closed (blocked) when no UI is available to ask, or the user
  *     declines.
@@ -31,7 +32,9 @@ const HOME = homedir();
 // Roots outside the launch cwd that get full, unrestricted bash access.
 // The cwd Pi was started in is added dynamically per-call (ctx.cwd), unless
 // it's too broad to auto-trust (see isTooBroadToTrust).
-const STATIC_ALLOWED_ROOTS = [join(HOME, "Code", "Work"), join(HOME, "Code", "Personal")];
+// `/tmp` is included because scratch/build work there is throwaway by
+// definition, and gating it produced constant false-positive friction.
+const STATIC_ALLOWED_ROOTS = [join(HOME, "Code", "Work"), join(HOME, "Code", "Personal"), "/tmp"];
 
 /**
  * Some cwd values are too broad to safely auto-trust, even though "the cwd
@@ -64,7 +67,7 @@ const DELETION_COMMANDS = new Set(["rm", "rmdir", "unlink", "shred"]);
 const SYSTEM_PROMPT_NOTE = `
 
 ## Filesystem safety (fs-guard extension)
-A local extension gates destructive bash commands (rm, rmdir, unlink, shred, git clean, find -delete, xargs+rm, dd/mkfs/wipefs, etc.). Commands targeting the current working directory, ~/Code/Work, or ~/Code/Personal run without friction. Commands targeting anywhere else require user confirmation and are blocked if no one can approve. Prefer literal paths for destructive commands instead of variables, command substitution, or globs — targets the extension can't confidently resolve are treated as unsafe and blocked automatically.`;
+For destructive shell commands, use literal absolute paths inside the current working directory, ~/Code/Work, ~/Code/Personal, or a named child of /tmp (for example, \`/tmp/pi-build\`). Prefer \`rm -rf /tmp/pi-build\` over variables, globs, or \`cd ... && rm ...\`. Never delete an allowed root itself. Other or ambiguous targets require confirmation; without a UI, they are blocked.`;
 
 interface Escalation {
 	reason: string;
@@ -183,6 +186,16 @@ function isInsideAnyRoot(target: string, roots: string[]): boolean {
 }
 
 /**
+ * Deleting *inside* a protected root is free; deleting the root directory
+ * itself (`rm -rf /tmp`, `rm -rf ~/Code/Work`) never is. Only applies to
+ * commands that remove the named directory — `git clean` empties its target
+ * but leaves it in place, so it isn't subject to this.
+ */
+function isRootItself(target: string, roots: string[]): boolean {
+	return roots.includes(target);
+}
+
+/**
  * Walks a (possibly compound) bash command looking for deletion-family
  * operations whose target escapes the allowed roots, or can't be
  * confidently resolved. Returns null when the command is safe to run
@@ -220,6 +233,9 @@ function evaluateCommandForEscalation(command: string, cwd: string, allowedRoots
 				if (ambiguous || !resolved || !isInsideAnyRoot(resolved, allowedRoots)) {
 					return { reason: `\`find ... -delete\` searches under "${searchPath}", which is outside the protected roots or unresolvable` };
 				}
+				if (isRootItself(resolved, allowedRoots)) {
+					return { reason: `\`find ... -delete\` would delete the protected root "${resolved}" itself, not just its contents` };
+				}
 			}
 			continue;
 		}
@@ -248,6 +264,9 @@ function evaluateCommandForEscalation(command: string, cwd: string, allowedRoots
 			}
 			if (!isInsideAnyRoot(resolved, allowedRoots)) {
 				return { reason: `\`${kind}\` targets "${resolved}", which is outside the protected roots` };
+			}
+			if (kind !== "git clean" && isRootItself(resolved, allowedRoots)) {
+				return { reason: `\`${kind}\` targets the protected root "${resolved}" itself, not something inside it` };
 			}
 		}
 	}
