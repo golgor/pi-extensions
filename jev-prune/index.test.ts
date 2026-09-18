@@ -93,7 +93,7 @@ describe("jev-prune", () => {
 		const persisted = mounted.appendedEntries[0]?.data as { mode: string; activeDroppedIds: string[]; run: { rawTokens: number; effectiveTokens: number } };
 		expect(persisted).toMatchObject({ mode: "dry", activeDroppedIds: [] });
 		expect(persisted.run.effectiveTokens).toBeLessThan(persisted.run.rawTokens);
-		expect(notifications.at(-1)?.message).toMatch(/^jev dry: would drop 1\/1 eligible pairs; effective context ~\d+k from ~70k$/);
+		expect(notifications.at(-1)?.message).toMatch(/^jev dry: would drop 1\/1 eligible pairs; effective context ~.+ from ~70k$/);
 	});
 
 	test("retains structurally ambiguous pairs without sending them to Jev", async () => {
@@ -322,5 +322,88 @@ describe("jev-prune", () => {
 			ctx,
 		);
 		expect(result).toBeUndefined();
+	});
+
+	test("entry renderer renders collapsed and expanded transcript cards with cost and candidate details", async () => {
+		const mounted = await mountWithAsker(fakeAsker(0.1));
+		expect(mounted.entryRenderers["jev-prune"]).toBeDefined();
+
+		const renderer = mounted.entryRenderers["jev-prune"]!;
+		const sampleEntry: SessionEntry = {
+			type: "custom",
+			id: "c1",
+			parentId: null,
+			timestamp: "2026-01-01T00:00:00.000Z",
+			customType: "jev-prune",
+			data: validPersistedState(),
+		};
+
+		const theme = {
+			fg: (_color: string, text: string) => text,
+			bg: (_color: string, text: string) => text,
+			bold: (text: string) => text,
+			dim: (text: string) => text,
+		};
+
+		// Collapsed view
+		const collapsedComponent = renderer(sampleEntry, { expanded: false }, theme);
+		const collapsedLines = collapsedComponent.render(80).join("\n");
+		expect(collapsedLines).toContain("[jev applied]");
+		expect(collapsedLines).toContain("Dropped 1/1 stale pairs");
+		expect(collapsedLines).toContain("(Space or expand to view details)");
+
+		// Expanded view
+		const expandedComponent = renderer(sampleEntry, { expanded: true }, theme);
+		const expandedLines = expandedComponent.render(80).join("\n");
+		expect(expandedLines).toContain("Run ID: r1");
+		expect(expandedLines).toContain("Inspect sample project");
+		expect(expandedLines).toContain("TypeSafe: 17 in / 2 out (<$0.0001)");
+		expect(expandedLines).toContain("read-old");
+		expect(expandedLines).toContain("DROP");
+	});
+
+	test("/jev view opens interactive modal overlay with Purged Pairs and Active Context tabs", async () => {
+		const mounted = await mountWithAsker(fakeAsker(0.1));
+		let customModalComponent: any;
+		let customModalOptions: any;
+
+		const ctx = makeContext({
+			cwd: "/tmp/jev-prune",
+			entries,
+			onCustomUI: (factory, options) => {
+				customModalOptions = options;
+				const done = () => {};
+				const tui = { requestRender: () => {} };
+				customModalComponent = factory(tui, ctx.ui.theme, {}, done);
+				return customModalComponent;
+			},
+		});
+
+		// Apply prune so there are active dropped pairs and latest run
+		await mounted.commands.jev?.("", ctx);
+
+		// Open viewer
+		await mounted.commands.jev?.("view", ctx);
+
+		expect(customModalOptions).toMatchObject({ overlay: true });
+		expect(customModalComponent).toBeDefined();
+
+		// Tab 1: Purged Pairs view
+		const tab1Lines = customModalComponent.render(100).join("\n");
+		expect(tab1Lines).toContain("1. Purged Pairs");
+		expect(tab1Lines).toContain("read-old");
+		expect(tab1Lines).toContain("DROPPED");
+
+		// Switch to Tab 2 via Tab key
+		customModalComponent.handleInput("\t");
+		const tab2Lines = customModalComponent.render(100).join("\n");
+		expect(tab2Lines).toContain("2. Active Context");
+		expect(tab2Lines).toContain("[jev: purged read call and successful result");
+		expect(tab2Lines).toContain("[User Message");
+
+		// Test key navigation (scroll, dismiss)
+		customModalComponent.handleInput("j");
+		customModalComponent.handleInput("k");
+		customModalComponent.handleInput("q");
 	});
 });

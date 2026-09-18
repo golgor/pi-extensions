@@ -5,45 +5,22 @@ import {
 	type ExtensionCommandContext,
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { applyPrunes, estimateMessageTokens } from "./apply";
+import { applyPrunes, estimateMessageTokens, estimateProportionalTokens } from "./apply";
 import { defaultGoal, eligibleCandidates, extractPairs, historyForJudgment } from "./candidates";
 import { createTypeSafeAsker, judgeCandidates, type RelevanceAsker } from "./judge";
+import {
+	createEntryRenderer,
+	openContextViewer,
+	type PersistedCandidate,
+	type PersistedRun,
+	type PersistedState,
+} from "./viewer";
 
 const CUSTOM_TYPE = "jev-prune";
 const STATUS_KEY = "jev-prune";
 const VERSION = 1;
 const GOAL_LIMIT = 4_000;
 const INPUT_SUMMARY_LIMIT = 240;
-
-interface PersistedCandidate {
-	toolCallId: string;
-	toolName: string;
-	inputSummary: string;
-	inputChars: number;
-	resultChars: number;
-	isError: boolean;
-	keepProbability: number;
-	outcome: "keep" | "drop";
-}
-
-interface PersistedRun {
-	id: string;
-	at: string;
-	mode: "dry" | "applied" | "reset";
-	goal?: string;
-	candidates: PersistedCandidate[];
-	rawTokens: number;
-	effectiveTokens: number;
-	usage: { inputTokens: number; outputTokens: number };
-	requestCount: number;
-}
-
-interface PersistedState {
-	version: number;
-	mode: PersistedRun["mode"];
-	activeDroppedIds: string[];
-	run: PersistedRun;
-}
 
 interface Dependencies {
 	ask?: RelevanceAsker;
@@ -133,13 +110,9 @@ function rawTokenEstimate(ctx: ExtensionContext, messages: ReturnType<typeof mes
 	return ctx.getContextUsage()?.tokens ?? estimateMessageTokens(messages);
 }
 
-/** Status projection can use observed usage because it is only informational. */
+/** Status projection uses proportional scaling against observed usage. */
 function statusEffectiveTokenEstimate(ctx: ExtensionContext, messages: ReturnType<typeof messagesForContext>, filtered: ReturnType<typeof messagesForContext>): number {
-	const estimatedRaw = estimateMessageTokens(messages);
-	const estimatedFiltered = estimateMessageTokens(filtered);
-	const observedRaw = ctx.getContextUsage()?.tokens;
-	if (observedRaw === null || observedRaw === undefined) return estimatedFiltered;
-	return Math.max(estimatedFiltered, observedRaw - Math.max(0, estimatedRaw - estimatedFiltered));
+	return estimateProportionalTokens(messages, filtered, ctx.getContextUsage()?.tokens);
 }
 
 function projectedCompactionTokens(tokensBefore: unknown, messages: ReturnType<typeof messagesForContext>, filtered: ReturnType<typeof messagesForContext>): number | undefined {
@@ -262,6 +235,8 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 		}
 	}
 
+	pi.registerEntryRenderer(CUSTOM_TYPE, createEntryRenderer());
+
 	pi.on("session_start", (_event, ctx) => restore(ctx));
 	pi.on("session_tree", (_event, ctx) => restore(ctx));
 
@@ -291,6 +266,12 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 		description: "Manually judge and reversibly prune stale tool-call/result pairs with Jev",
 		handler: async (args, ctx) => {
 			const input = args.trim();
+			if (input === "view" || input === "inspect") {
+				const messages = messagesForContext(ctx);
+				const latest = runs.at(-1);
+				await openContextViewer(ctx, messages, activeDroppedIds, latest);
+				return;
+			}
 			if (input === "status") {
 				const messages = messagesForContext(ctx);
 				const latest = runs.at(-1);
