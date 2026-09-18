@@ -21,7 +21,7 @@
  *   );
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 
 // biome-ignore lint/suspicious/noExplicitAny: handlers accept whatever event/result shape their event type uses
 type AnyHandler = (event: any, ctx: ExtensionContext) => unknown | Promise<unknown>;
@@ -34,6 +34,8 @@ export interface MountedExtension {
 	handlers: Record<string, AnyHandler>;
 	/** Slash-command handlers registered via `pi.registerCommand`, keyed by name. */
 	commands: Record<string, AnyCommandHandler>;
+	/** Extension-owned custom entries appended during the test. */
+	appendedEntries: Array<{ customType: string; data: unknown }>;
 }
 
 /**
@@ -49,6 +51,7 @@ export async function mountExtension(
 ): Promise<MountedExtension> {
 	const handlers: Record<string, AnyHandler> = {};
 	const commands: Record<string, AnyCommandHandler> = {};
+	const appendedEntries: Array<{ customType: string; data: unknown }> = [];
 
 	const fakePi = {
 		on(event: string, handler: AnyHandler) {
@@ -57,11 +60,14 @@ export async function mountExtension(
 		registerCommand(name: string, options: { handler: AnyCommandHandler }) {
 			commands[name] = options.handler;
 		},
+		appendEntry(customType: string, data: unknown) {
+			appendedEntries.push({ customType, data });
+		},
 		...extras,
 	} as unknown as ExtensionAPI;
 
 	await factory(fakePi);
-	return { handlers, commands };
+	return { handlers, commands, appendedEntries };
 }
 
 /** Builds a fake `pi.exec` from a matcher: return stdout for a given command+args, or throw/undefined. */
@@ -93,17 +99,45 @@ export interface FakeContextOptions {
 	hasUI?: boolean;
 	/** What `ctx.ui.confirm(...)` resolves to when a UI is available. Default: true. */
 	confirm?: boolean;
+	/** Active branch entries exposed through the read-only session manager. */
+	entries?: SessionEntry[];
+	/** Active model context window used by compaction handlers. Default: 128k. */
+	contextWindow?: number;
+	/** Current raw context token estimate. */
+	contextTokens?: number | null;
+	/** Captures status/footer values set by an extension. */
+	statuses?: Map<string, string | undefined>;
+	/** Captures UI notifications emitted by an extension. */
+	notifications?: Array<{ message: string; type: string | undefined }>;
 }
 
-/** Builds a minimal fake `ExtensionContext` sufficient for testing tool_call handlers. */
+/** Builds a minimal fake `ExtensionContext` with branch-backed session reads. */
 export function makeContext(options: FakeContextOptions): ExtensionContext {
-	const { cwd, hasUI = true, confirm = true } = options;
+	const {
+		cwd,
+		hasUI = true,
+		confirm = true,
+		entries = [],
+		contextWindow = 128_000,
+		contextTokens = null,
+		statuses = new Map(),
+		notifications = [],
+	} = options;
 	return {
 		cwd,
 		hasUI,
+		mode: "tui",
+		model: { contextWindow },
+		getContextUsage: () => ({ tokens: contextTokens, contextWindow, percent: null }),
+		sessionManager: {
+			getEntries: () => entries,
+			getBranch: () => entries,
+			getLeafId: () => entries.at(-1)?.id ?? null,
+		},
 		ui: {
 			confirm: async () => confirm,
-			notify: () => {},
+			notify: (message: string, type?: string) => notifications.push({ message, type }),
+			setStatus: (key: string, text: string | undefined) => statuses.set(key, text),
 		},
 	} as unknown as ExtensionContext;
 }

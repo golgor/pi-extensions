@@ -3,5 +3,8 @@
   "private": true,
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.80.6"
+  },
+  "dependencies": {
+    "@typesafe-ai/sdk": "^0.6.0"
   }
 }
