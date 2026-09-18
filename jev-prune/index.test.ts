@@ -93,7 +93,7 @@ describe("jev-prune", () => {
 		const persisted = mounted.appendedEntries[0]?.data as { mode: string; activeDroppedIds: string[]; run: { rawTokens: number; effectiveTokens: number } };
 		expect(persisted).toMatchObject({ mode: "dry", activeDroppedIds: [] });
 		expect(persisted.run.effectiveTokens).toBeLessThan(persisted.run.rawTokens);
-		expect(notifications.at(-1)?.message).toMatch(/^jev dry: would drop 1\/1 eligible pairs; effective context ~.+ from ~70k$/);
+		expect(notifications.at(-1)?.message).toMatch(/^jev dry: would drop 1\/1 eligible pairs · context ~.+ from ~70k$/);
 	});
 
 	test("retains structurally ambiguous pairs without sending them to Jev", async () => {

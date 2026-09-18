@@ -228,7 +228,10 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 			runs.push(run);
 			updateStatus(ctx, messages);
 			const verb = mode === "dry" ? "would drop" : "dropped";
-			notify(ctx, `jev${mode === "dry" ? " dry" : ""}: ${verb} ${newlyDroppedIds.length}/${candidates.length} eligible pairs; effective context ~${formatTokens(run.effectiveTokens)} from ~${formatTokens(run.rawTokens)}`);
+			const summary = candidates.length === 0
+				? `0 new eligible pairs to judge (recent 6 turns pinned${activeDroppedIds.size > 0 ? `; ${activeDroppedIds.size} earlier pairs already pruned` : ""})`
+				: `${verb} ${newlyDroppedIds.length}/${candidates.length} eligible pairs`;
+			notify(ctx, `jev${mode === "dry" ? " dry" : ""}: ${summary} · context ~${formatTokens(run.effectiveTokens)} from ~${formatTokens(run.rawTokens)}`);
 		} catch {
 			// Do not expose SDK request bodies or server error details in Pi UI/logs.
 			notify(ctx, "jev: no changes; judgment failed. Existing pruning state is unchanged.", "error");
