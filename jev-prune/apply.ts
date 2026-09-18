@@ -39,3 +39,23 @@ export function applyPrunes(messages: AgentMessage[], activeDroppedIds: Readonly
 export function estimateMessageTokens(messages: AgentMessage[]): number {
 	return messages.reduce((total, message) => total + estimateTokens(message), 0);
 }
+
+/**
+ * Estimate effective tokens using proportional character reduction against
+ * the model's observed context token count.
+ */
+export function estimateProportionalTokens(
+	messages: AgentMessage[],
+	filtered: AgentMessage[],
+	observedTokens?: number | null,
+): number {
+	const rawTokens = estimateMessageTokens(messages);
+	const filteredTokens = estimateMessageTokens(filtered);
+	if (!Number.isFinite(rawTokens) || rawTokens <= 0) return filteredTokens;
+
+	const remainingRatio = Math.max(0, Math.min(1, filteredTokens / rawTokens));
+	if (observedTokens !== null && observedTokens !== undefined && Number.isFinite(observedTokens) && observedTokens > 0) {
+		return Math.round(observedTokens * remainingRatio);
+	}
+	return filteredTokens;
+}

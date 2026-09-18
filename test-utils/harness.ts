@@ -36,6 +36,8 @@ export interface MountedExtension {
 	commands: Record<string, AnyCommandHandler>;
 	/** Extension-owned custom entries appended during the test. */
 	appendedEntries: Array<{ customType: string; data: unknown }>;
+	/** Custom entry renderers registered via `pi.registerEntryRenderer`. */
+	entryRenderers: Record<string, (entry: any, options: { expanded: boolean }, theme: any) => any>;
 }
 
 /**
@@ -52,6 +54,7 @@ export async function mountExtension(
 	const handlers: Record<string, AnyHandler> = {};
 	const commands: Record<string, AnyCommandHandler> = {};
 	const appendedEntries: Array<{ customType: string; data: unknown }> = [];
+	const entryRenderers: Record<string, (entry: any, options: { expanded: boolean }, theme: any) => any> = {};
 
 	const fakePi = {
 		on(event: string, handler: AnyHandler) {
@@ -63,11 +66,14 @@ export async function mountExtension(
 		appendEntry(customType: string, data: unknown) {
 			appendedEntries.push({ customType, data });
 		},
+		registerEntryRenderer(customType: string, renderer: any) {
+			entryRenderers[customType] = renderer;
+		},
 		...extras,
 	} as unknown as ExtensionAPI;
 
 	await factory(fakePi);
-	return { handlers, commands, appendedEntries };
+	return { handlers, commands, appendedEntries, entryRenderers };
 }
 
 /** Builds a fake `pi.exec` from a matcher: return stdout for a given command+args, or throw/undefined. */
@@ -109,6 +115,8 @@ export interface FakeContextOptions {
 	statuses?: Map<string, string | undefined>;
 	/** Captures UI notifications emitted by an extension. */
 	notifications?: Array<{ message: string; type: string | undefined }>;
+	/** Mock handler for ctx.ui.custom components. */
+	onCustomUI?: (factory: Function, options?: any) => any;
 }
 
 /** Builds a minimal fake `ExtensionContext` with branch-backed session reads. */
@@ -122,7 +130,17 @@ export function makeContext(options: FakeContextOptions): ExtensionContext {
 		contextTokens = null,
 		statuses = new Map(),
 		notifications = [],
+		onCustomUI,
 	} = options;
+
+	const theme = {
+		fg: (_color: string, text: string) => text,
+		bg: (_color: string, text: string) => text,
+		bold: (text: string) => text,
+		dim: (text: string) => text,
+		italic: (text: string) => text,
+	};
+
 	return {
 		cwd,
 		hasUI,
@@ -135,9 +153,21 @@ export function makeContext(options: FakeContextOptions): ExtensionContext {
 			getLeafId: () => entries.at(-1)?.id ?? null,
 		},
 		ui: {
+			theme,
 			confirm: async () => confirm,
 			notify: (message: string, type?: string) => notifications.push({ message, type }),
 			setStatus: (key: string, text: string | undefined) => statuses.set(key, text),
+			custom: async (factoryOrOptions: any, maybeOptions?: any) => {
+				const factory = typeof factoryOrOptions === "function" ? factoryOrOptions : maybeOptions;
+				const opts = typeof factoryOrOptions === "function" ? maybeOptions : factoryOrOptions;
+				if (onCustomUI) return onCustomUI(factory, opts);
+				let result: any;
+				const done = (val: any) => { result = val; };
+				const tui = { requestRender: () => {} };
+				const keybindings = {};
+				const comp = factory(tui, theme, keybindings, done);
+				return result ?? comp;
+			},
 		},
 	} as unknown as ExtensionContext;
 }
