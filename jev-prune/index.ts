@@ -232,9 +232,19 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 				? `0 new eligible pairs to judge (recent 6 turns pinned${activeDroppedIds.size > 0 ? `; ${activeDroppedIds.size} earlier pairs already pruned` : ""})`
 				: `${verb} ${newlyDroppedIds.length}/${candidates.length} eligible pairs`;
 			notify(ctx, `jev${mode === "dry" ? " dry" : ""}: ${summary} · context ~${formatTokens(run.effectiveTokens)} from ~${formatTokens(run.rawTokens)}`);
-		} catch {
-			// Do not expose SDK request bodies or server error details in Pi UI/logs.
-			notify(ctx, "jev: no changes; judgment failed. Existing pruning state is unchanged.", "error");
+		} catch (error: any) {
+			let errorReason = "judgment failed";
+			const msg = typeof error?.message === "string" ? error.message : "";
+			if (!process.env.TYPESAFE_API_KEY || msg.includes("No API key was provided")) {
+				errorReason = "missing TYPESAFE_API_KEY environment variable";
+			} else if (error?.status === 401 || msg.includes("AuthenticationError") || msg.includes("authentication failed")) {
+				errorReason = "TypeSafe authentication failed (check TYPESAFE_API_KEY)";
+			} else if (error?.status === 429 || msg.includes("RateLimitError") || msg.includes("rate limit")) {
+				errorReason = "TypeSafe rate limit reached; retry shortly";
+			} else if (msg.includes("state budget")) {
+				errorReason = "candidate state exceeds request token budget";
+			}
+			notify(ctx, `jev: no changes; ${errorReason}. Existing pruning state is unchanged.`, "error");
 		}
 	}
 
