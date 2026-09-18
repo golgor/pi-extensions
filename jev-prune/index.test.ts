@@ -406,4 +406,18 @@ describe("jev-prune", () => {
 		customModalComponent.handleInput("k");
 		customModalComponent.handleInput("q");
 	});
+
+	test("exposes subcommand argument completions with descriptions", async () => {
+		const ext = await mountExtension((pi) => jevPrune(pi, { ask: fakeAsker(0) }));
+		const complete = ext.commandCompletions.jev;
+		expect(complete).toBeDefined();
+
+		const all = await complete("");
+		expect(all.map((item: { value: string }) => item.value)).toEqual(["", "dry", "view", "inspect", "status", "history", "reset"]);
+		expect(all.every((item: { description?: string }) => typeof item.description === "string" && item.description.length > 0)).toBe(true);
+
+		expect((await complete("d")).map((item: { value: string }) => item.value)).toEqual(["dry"]);
+		expect((await complete("HIST")).map((item: { value: string }) => item.value)).toEqual(["history"]);
+		expect(await complete("zzz")).toEqual([]);
+	});
 });

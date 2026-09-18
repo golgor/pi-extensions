@@ -34,6 +34,8 @@ export interface MountedExtension {
 	handlers: Record<string, AnyHandler>;
 	/** Slash-command handlers registered via `pi.registerCommand`, keyed by name. */
 	commands: Record<string, AnyCommandHandler>;
+	/** Argument-completion providers registered per command, keyed by name. */
+	commandCompletions: Record<string, (prefix: string) => any>;
 	/** Extension-owned custom entries appended during the test. */
 	appendedEntries: Array<{ customType: string; data: unknown }>;
 	/** Custom entry renderers registered via `pi.registerEntryRenderer`. */
@@ -53,6 +55,7 @@ export async function mountExtension(
 ): Promise<MountedExtension> {
 	const handlers: Record<string, AnyHandler> = {};
 	const commands: Record<string, AnyCommandHandler> = {};
+	const commandCompletions: Record<string, (prefix: string) => any> = {};
 	const appendedEntries: Array<{ customType: string; data: unknown }> = [];
 	const entryRenderers: Record<string, (entry: any, options: { expanded: boolean }, theme: any) => any> = {};
 
@@ -60,8 +63,9 @@ export async function mountExtension(
 		on(event: string, handler: AnyHandler) {
 			handlers[event] = handler;
 		},
-		registerCommand(name: string, options: { handler: AnyCommandHandler }) {
+		registerCommand(name: string, options: { handler: AnyCommandHandler; getArgumentCompletions?: (prefix: string) => any }) {
 			commands[name] = options.handler;
+			if (options.getArgumentCompletions) commandCompletions[name] = options.getArgumentCompletions;
 		},
 		appendEntry(customType: string, data: unknown) {
 			appendedEntries.push({ customType, data });
@@ -73,7 +77,7 @@ export async function mountExtension(
 	} as unknown as ExtensionAPI;
 
 	await factory(fakePi);
-	return { handlers, commands, appendedEntries, entryRenderers };
+	return { handlers, commands, commandCompletions, appendedEntries, entryRenderers };
 }
 
 /** Builds a fake `pi.exec` from a matcher: return stdout for a given command+args, or throw/undefined. */
