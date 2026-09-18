@@ -20,36 +20,7 @@ import {
 import { applyPrunes } from "./apply";
 import { estimateCost, formatBytes, formatTokens } from "./accounting";
 import { textFromContent } from "./candidates";
-
-export interface PersistedCandidate {
-	toolCallId: string;
-	toolName: string;
-	inputSummary: string;
-	inputChars: number;
-	resultChars: number;
-	isError: boolean;
-	keepProbability: number;
-	outcome: "keep" | "drop";
-}
-
-export interface PersistedRun {
-	id: string;
-	at: string;
-	mode: "dry" | "applied" | "reset";
-	goal?: string;
-	candidates: PersistedCandidate[];
-	rawTokens: number;
-	effectiveTokens: number;
-	usage: { inputTokens: number; outputTokens: number };
-	requestCount: number;
-}
-
-export interface PersistedState {
-	version: number;
-	mode: PersistedRun["mode"];
-	activeDroppedIds: string[];
-	run: PersistedRun;
-}
+import type { PersistedCandidate, PersistedRun, PersistedState } from "./record";
 
 /**
  * Register entry renderer for inline transcript cards.
