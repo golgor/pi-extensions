@@ -101,7 +101,7 @@ export function createEntryRenderer() {
 		box.addChild(new Text(summaryLine, 0, 0));
 
 		if (!expanded) {
-			box.addChild(new Text(theme.fg("dim", "  (Space or expand to view details)"), 0, 0));
+			box.addChild(new Text(theme.fg("dim", "  (Ctrl+O to expand details)"), 0, 0));
 			return box;
 		}
 
@@ -239,8 +239,11 @@ class ContextViewerComponent implements Component {
 		const theme = this.theme;
 
 		// 1. Header with Tab Bar
-		const tab1Label = ` 1. Purged Pairs (${this.latestRun?.candidates.length ?? 0}) `;
-		const tab2Label = ` 2. Active Context (${this.messages.length} msgs) `;
+		const isDry = this.latestRun?.mode === "dry";
+		const tab1Label = isDry
+			? ` 1. Latest Dry Run (${this.latestRun?.candidates.length ?? 0} evaluated) `
+			: ` 1. Latest Run (${this.latestRun?.candidates.length ?? 0} candidates) `;
+		const tab2Label = ` 2. Active Context (${this.messages.length} msgs · ${this.activeDroppedIds.size} purged) `;
 
 		const tab1Styled = this.activeTab === "purged"
 			? theme.bg("selectedBg", theme.bold(theme.fg("accent", tab1Label)))
@@ -294,14 +297,21 @@ class ContextViewerComponent implements Component {
 		if (!this.latestRun || this.latestRun.candidates.length === 0) {
 			lines.push("");
 			lines.push(theme.fg("muted", "  No candidates recorded in latest run."));
+			lines.push(theme.fg("dim", `  Active dropped in current session context: ${this.activeDroppedIds.size} pairs.`));
 			lines.push(theme.fg("dim", "  Run /jev dry or /jev to evaluate stale tool calls."));
 			return;
 		}
 
-		lines.push(theme.fg("muted", `  Run ID: ${this.latestRun.id} · Timestamp: ${this.latestRun.at} · Mode: ${this.latestRun.mode}`));
+		const isDry = this.latestRun.mode === "dry";
+		const modeBadge = isDry
+			? theme.fg("warning", `[DRY RUN - ${this.latestRun.candidates.length} evaluated, none applied]`)
+			: theme.fg("success", `[APPLIED - ${this.activeDroppedIds.size} active prunes in context]`);
+
+		lines.push(theme.fg("muted", `  Run ID: ${this.latestRun.id} · Timestamp: ${this.latestRun.at} · ${modeBadge}`));
 		if (this.latestRun.goal) {
 			lines.push(theme.fg("dim", `  Goal: "${truncateToWidth(this.latestRun.goal.replace(/\n/g, " "), width - 12, "...")}"`));
 		}
+		lines.push(theme.fg("dim", `  Active dropped in current session context: ${this.activeDroppedIds.size} pairs`));
 		lines.push("");
 		lines.push(theme.bold("  #   ID         Tool    Input Summary                             Orig Size  p(keep)  Status"));
 		lines.push(theme.fg("borderMuted", "  " + "─".repeat(Math.min(width - 4, 90))));
@@ -313,7 +323,9 @@ class ContextViewerComponent implements Component {
 			const input = truncateToWidth(cand.inputSummary.replace(/\n/g, " "), 38).padEnd(40, " ");
 			const size = formatBytes(cand.resultChars).padStart(9, " ");
 			const prob = cand.keepProbability.toFixed(2).padStart(7, " ");
-			const status = cand.outcome === "drop" ? theme.fg("warning", "DROPPED") : theme.fg("success", "KEPT   ");
+			const status = isDry
+				? (cand.outcome === "drop" ? theme.fg("warning", "WOULD DROP") : theme.fg("success", "WOULD KEEP"))
+				: (cand.outcome === "drop" ? theme.fg("warning", "PURGED    ") : theme.fg("success", "KEPT      "));
 			lines.push(`  ${num}  ${theme.fg("muted", id)} ${theme.fg("accent", tool)} ${theme.fg("dim", input)} ${size} ${prob}  ${status}`);
 		});
 	}

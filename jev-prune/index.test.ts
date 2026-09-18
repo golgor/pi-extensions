@@ -350,7 +350,7 @@ describe("jev-prune", () => {
 		const collapsedLines = collapsedComponent.render(80).join("\n");
 		expect(collapsedLines).toContain("[jev applied]");
 		expect(collapsedLines).toContain("Dropped 1/1 stale pairs");
-		expect(collapsedLines).toContain("(Space or expand to view details)");
+		expect(collapsedLines).toContain("(Ctrl+O to expand details)");
 
 		// Expanded view
 		const expandedComponent = renderer(sampleEntry, { expanded: true }, theme);
@@ -390,9 +390,9 @@ describe("jev-prune", () => {
 
 		// Tab 1: Purged Pairs view
 		const tab1Lines = customModalComponent.render(100).join("\n");
-		expect(tab1Lines).toContain("1. Purged Pairs");
+		expect(tab1Lines).toContain("1. Latest Run");
 		expect(tab1Lines).toContain("read-old");
-		expect(tab1Lines).toContain("DROPPED");
+		expect(tab1Lines).toContain("PURGED");
 
 		// Switch to Tab 2 via Tab key
 		customModalComponent.handleInput("\t");
