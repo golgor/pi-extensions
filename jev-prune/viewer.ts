@@ -120,14 +120,14 @@ export function createEntryRenderer() {
 
 		if (run.candidates.length > 0) {
 			detailsContainer.addChild(new Spacer(1));
-			detailsContainer.addChild(new Text(theme.bold("  #   ID         Tool    Input Summary                             Size     p(keep)  Status"), 0, 0));
+			detailsContainer.addChild(new Text(theme.bold("  #    ID             Tool       Input Summary                             Size     p(keep)  Status"), 0, 0));
 			detailsContainer.addChild(new DynamicBorder((s: string) => theme.fg("borderMuted", s)));
 
 			run.candidates.forEach((cand, idx) => {
-				const num = String(idx + 1).padStart(2, "0");
-				const id = truncateToWidth(cand.toolCallId, 10).padEnd(10, " ");
-				const tool = cand.toolName.padEnd(7, " ");
-				const input = truncateToWidth(cand.inputSummary.replace(/\n/g, " "), 38).padEnd(40, " ");
+				const num = String(idx + 1).padStart(3, "0");
+				const id = truncateToWidth(cand.toolCallId, 14).padEnd(14, " ");
+				const tool = cand.toolName.slice(0, 9).padEnd(9, " ");
+				const input = truncateToWidth(cand.inputSummary.replace(/\n/g, " "), 40).padEnd(41, " ");
 				const size = formatBytes(cand.resultChars).padStart(8, " ");
 				const prob = cand.keepProbability.toFixed(2).padStart(7, " ");
 				const status = cand.outcome === "drop" ? theme.fg("warning", "DROP") : theme.fg("success", "KEEP");
@@ -314,20 +314,23 @@ class ContextViewerComponent implements Component {
 		}
 		lines.push(theme.fg("dim", `  Active dropped in current session context: ${this.activeDroppedIds.size} pairs`));
 		lines.push("");
-		lines.push(theme.bold("  #   ID         Tool    Input Summary                             Orig Size  p(keep)  Status"));
-		lines.push(theme.fg("borderMuted", "  " + "─".repeat(Math.min(width - 4, 90))));
+
+		const inputWidth = Math.max(25, width - 68);
+		const header = `  #    ID             Tool       Input Summary` + " ".repeat(Math.max(0, inputWidth - 13)) + "  Orig Size  p(keep)  Status";
+		lines.push(theme.bold(header));
+		lines.push(theme.fg("borderMuted", "  " + "─".repeat(Math.min(width - 4, header.length - 2))));
 
 		this.latestRun.candidates.forEach((cand, idx) => {
-			const num = String(idx + 1).padStart(2, "0");
-			const id = truncateToWidth(cand.toolCallId, 10).padEnd(10, " ");
-			const tool = cand.toolName.padEnd(7, " ");
-			const input = truncateToWidth(cand.inputSummary.replace(/\n/g, " "), 38).padEnd(40, " ");
+			const num = String(idx + 1).padStart(3, "0");
+			const id = truncateToWidth(cand.toolCallId, 14).padEnd(14, " ");
+			const tool = cand.toolName.slice(0, 9).padEnd(9, " ");
+			const input = truncateToWidth(cand.inputSummary.replace(/\n/g, " "), inputWidth).padEnd(inputWidth, " ");
 			const size = formatBytes(cand.resultChars).padStart(9, " ");
 			const prob = cand.keepProbability.toFixed(2).padStart(7, " ");
 			const status = isDry
 				? (cand.outcome === "drop" ? theme.fg("warning", "WOULD DROP") : theme.fg("success", "WOULD KEEP"))
 				: (cand.outcome === "drop" ? theme.fg("warning", "PURGED    ") : theme.fg("success", "KEPT      "));
-			lines.push(`  ${num}  ${theme.fg("muted", id)} ${theme.fg("accent", tool)} ${theme.fg("dim", input)} ${size} ${prob}  ${status}`);
+			lines.push(`  ${num}  ${theme.fg("muted", id)} ${theme.fg("accent", tool)} ${theme.fg("dim", input)}  ${size} ${prob}  ${status}`);
 		});
 	}
 
