@@ -457,6 +457,24 @@ describe("jev-prune", () => {
 		customModalComponent.handleInput("q");
 	});
 
+	test("completions and dispatch derive from the same subcommand set", async () => {
+		const seen: string[] = [];
+		const mounted = await mountWithAsker(fakeAsker(0.1, seen));
+		const complete = mounted.commandCompletions.jev;
+		const names = (await complete("")).map((item: { value: string }) => item.value);
+		expect(names).toEqual(["dry", "view", "inspect", "status", "history", "reset"]);
+
+		const ctx = makeContext({ cwd: "/tmp/jev-prune", entries });
+		for (const name of names) {
+			if (name === "dry") continue; // dry intentionally forwards to the judged run, covered elsewhere
+			await mounted.commands.jev?.(name, ctx);
+		}
+		expect(seen).toEqual([]); // every non-dry completion name has its own dispatch entry, none fell through to the judged "applied" path
+
+		await mounted.commands.jev?.("unknown-command", ctx);
+		expect(seen).toEqual(["read-old"]); // a name absent from the table still falls through to the judged run, proving the fallback is reachable only outside the table
+	});
+
 	test("exposes subcommand argument completions with descriptions", async () => {
 		const ext = await mountExtension((pi) => jevPrune(pi, { ask: fakeAsker(0) }));
 		const complete = ext.commandCompletions.jev;

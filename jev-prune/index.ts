@@ -194,46 +194,69 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 		}
 	});
 
-	pi.registerCommand("jev", {
-		description: "Manually judge and reversibly prune stale tool-call/result pairs with Jev",
-		getArgumentCompletions: (prefix) => {
-			const subcommands = [
-				{ value: "dry", label: "dry", description: "Preview what would be pruned without changing context" },
-				{ value: "view", label: "view", description: "Open the interactive modal: purged pairs + active context" },
-				{ value: "inspect", label: "inspect", description: "Alias for /jev view" },
-				{ value: "status", label: "status", description: "Show current pruning state and latest run summary" },
-				{ value: "history", label: "history", description: "List all recorded runs on this branch" },
-				{ value: "reset", label: "reset", description: "Restore all pruned pairs to the context" },
-			];
-			const normalized = prefix.trim().toLowerCase();
-			return subcommands.filter((item) => item.value.startsWith(normalized));
+	/** Shared by the "view" and "inspect" subcommands (inspect is a plain alias). */
+	async function runViewer(ctx: ExtensionCommandContext) {
+		const messages = messagesForContext(ctx);
+		const latest = runs.at(-1);
+		await openContextViewer(ctx, messages, activeDroppedIds, latest);
+	}
+
+	// Single source for the /jev subcommand set: both getArgumentCompletions and
+	// the dispatch handler below derive from this table so the two can't drift.
+	const subcommands: Array<{
+		name: string;
+		description: string;
+		/** Whether trailing text after the name is a parameter (dry/history) vs. disqualifying (falls through to the applied run, as today). */
+		acceptsArgument: boolean;
+		run: (ctx: ExtensionCommandContext, rest: string) => void | Promise<void>;
+	}> = [
+		{
+			name: "dry",
+			description: "Preview what would be pruned without changing context",
+			acceptsArgument: true,
+			run: (ctx, rest) => executeRun("dry", rest, ctx),
 		},
-		handler: async (args, ctx) => {
-			const input = args.trim();
-			if (input === "view" || input === "inspect") {
-				const messages = messagesForContext(ctx);
-				const latest = runs.at(-1);
-				await openContextViewer(ctx, messages, activeDroppedIds, latest);
-				return;
-			}
-			if (input === "status") {
+		{
+			name: "view",
+			description: "Open the interactive modal: purged pairs + active context",
+			acceptsArgument: false,
+			run: runViewer,
+		},
+		{
+			name: "inspect",
+			description: "Alias for /jev view",
+			acceptsArgument: false,
+			run: runViewer,
+		},
+		{
+			name: "status",
+			description: "Show current pruning state and latest run summary",
+			acceptsArgument: false,
+			run: (ctx) => {
 				const messages = messagesForContext(ctx);
 				const latest = runs.at(-1);
 				const current = statusText(ctx, messages, activeDroppedIds) ?? "Jev inactive";
 				notify(ctx, latest ? `${current}\n${formatRun(latest)}${latest.candidates.length > 0 ? `\n${formatCandidates(latest)}` : ""}` : current);
-				return;
-			}
-			if (input === "history") {
-				notify(ctx, runs.length === 0 ? "jev: no recorded runs on this branch." : runs.map(formatRun).join("\n"));
-				return;
-			}
-			if (input.startsWith("history ")) {
-				const id = input.slice("history ".length).trim();
-				const run = runs.find((item) => item.id === id);
-				notify(ctx, run ? `${formatRun(run)}${run.candidates.length > 0 ? `\n${formatCandidates(run)}` : ""}` : `jev: no run named ${id}.`, run ? "info" : "warning");
-				return;
-			}
-			if (input === "reset") {
+			},
+		},
+		{
+			name: "history",
+			description: "List all recorded runs on this branch",
+			acceptsArgument: true,
+			run: (ctx, rest) => {
+				if (rest === "") {
+					notify(ctx, runs.length === 0 ? "jev: no recorded runs on this branch." : runs.map(formatRun).join("\n"));
+					return;
+				}
+				const run = runs.find((item) => item.id === rest);
+				notify(ctx, run ? `${formatRun(run)}${run.candidates.length > 0 ? `\n${formatCandidates(run)}` : ""}` : `jev: no run named ${rest}.`, run ? "info" : "warning");
+			},
+		},
+		{
+			name: "reset",
+			description: "Restore all pruned pairs to the context",
+			acceptsArgument: false,
+			run: async (ctx) => {
 				const messages = messagesForContext(ctx);
 				const availableIds = new Set(extractPairs(messages).map((candidate) => candidate.toolCallId));
 				const restored = [...activeDroppedIds].filter((id) => availableIds.has(id)).length;
@@ -257,14 +280,30 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 				} catch {
 					notify(ctx, "jev: reset failed; existing pruning state is unchanged.", "error");
 				}
+			},
+		},
+	];
+
+	pi.registerCommand("jev", {
+		description: "Manually judge and reversibly prune stale tool-call/result pairs with Jev",
+		getArgumentCompletions: (prefix) => {
+			const normalized = prefix.trim().toLowerCase();
+			return subcommands
+				.filter((item) => item.name.startsWith(normalized))
+				.map((item) => ({ value: item.name, label: item.name, description: item.description }));
+		},
+		handler: async (args, ctx) => {
+			const input = args.trim();
+			const spaceIndex = input.indexOf(" ");
+			const head = spaceIndex === -1 ? input : input.slice(0, spaceIndex);
+			const rest = spaceIndex === -1 ? "" : input.slice(spaceIndex + 1).trim();
+			const subcommand = head ? subcommands.find((item) => item.name === head) : undefined;
+			if (subcommand && (subcommand.acceptsArgument || rest === "")) {
+				await subcommand.run(ctx, rest);
 				return;
 			}
 			if (input === "restore" || input.startsWith("restore ")) {
 				notify(ctx, "jev: per-call restore is not available in v1; use /jev reset.", "warning");
-				return;
-			}
-			if (input === "dry" || input.startsWith("dry ")) {
-				await executeRun("dry", input.slice("dry".length).trim(), ctx);
 				return;
 			}
 			await executeRun("applied", input, ctx);
