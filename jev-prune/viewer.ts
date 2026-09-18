@@ -120,18 +120,18 @@ export function createEntryRenderer() {
 
 		if (run.candidates.length > 0) {
 			detailsContainer.addChild(new Spacer(1));
-			detailsContainer.addChild(new Text(theme.bold("  #    ID             Tool       Input Summary                             Size     p(keep)  Status"), 0, 0));
+			detailsContainer.addChild(new Text(theme.bold("  #    ID                      Tool            Input Summary                             Size     p(keep)  Status"), 0, 0));
 			detailsContainer.addChild(new DynamicBorder((s: string) => theme.fg("borderMuted", s)));
 
 			run.candidates.forEach((cand, idx) => {
 				const num = String(idx + 1).padStart(3, "0");
-				const id = truncateToWidth(cand.toolCallId, 14).padEnd(14, " ");
-				const tool = cand.toolName.slice(0, 9).padEnd(9, " ");
+				const id = (cand.toolCallId.length > 22 ? cand.toolCallId.slice(0, 19) + "..." : cand.toolCallId).padEnd(22, " ");
+				const tool = (cand.toolName.length > 14 ? cand.toolName.slice(0, 11) + "..." : cand.toolName).padEnd(14, " ");
 				const input = truncateToWidth(cand.inputSummary.replace(/\n/g, " "), 40).padEnd(41, " ");
 				const size = formatBytes(cand.resultChars).padStart(8, " ");
 				const prob = cand.keepProbability.toFixed(2).padStart(7, " ");
 				const status = cand.outcome === "drop" ? theme.fg("warning", "DROP") : theme.fg("success", "KEEP");
-				detailsContainer.addChild(new Text(`  ${num}  ${theme.fg("muted", id)} ${theme.fg("accent", tool)} ${theme.fg("dim", input)} ${size} ${prob}   ${status}`, 0, 0));
+				detailsContainer.addChild(new Text(`  ${num}  ${theme.fg("muted", id)}  ${theme.fg("accent", tool)}  ${theme.fg("dim", input)} ${size} ${prob}   ${status}`, 0, 0));
 			});
 		}
 
@@ -272,30 +272,34 @@ class ContextViewerComponent implements Component {
 		lines.push(truncateToWidth("─".repeat(width), width));
 
 		// 2. Tab Content Lines
-		const contentLines: string[] = [];
+		const fixedHeaderLines: string[] = [];
+		const scrollableContentLines: string[] = [];
+
 		if (this.activeTab === "purged") {
-			this.renderPurgedTab(contentLines, width);
+			this.renderPurgedTab(fixedHeaderLines, scrollableContentLines, width);
 		} else {
-			this.renderContextTab(contentLines, width);
+			this.renderContextTab(fixedHeaderLines, scrollableContentLines, width);
 		}
 
+		lines.push(...fixedHeaderLines);
+
 		// 3. Scroll and Viewport Windowing
-		const maxViewLines = 28;
-		const maxOffset = Math.max(0, contentLines.length - maxViewLines);
+		const maxViewLines = Math.max(10, 28 - fixedHeaderLines.length);
+		const maxOffset = Math.max(0, scrollableContentLines.length - maxViewLines);
 		this.scrollOffset = Math.min(this.scrollOffset, maxOffset);
 
-		const visibleSlice = contentLines.slice(this.scrollOffset, this.scrollOffset + maxViewLines);
+		const visibleSlice = scrollableContentLines.slice(this.scrollOffset, this.scrollOffset + maxViewLines);
 		lines.push(...visibleSlice);
 
 		// Fill empty space if short
-		while (lines.length < maxViewLines + 2) {
+		while (lines.length < 30) {
 			lines.push("");
 		}
 
 		// 4. Footer info
 		lines.push(truncateToWidth("─".repeat(width), width));
-		const scrollPercent = contentLines.length > maxViewLines
-			? ` · Scroll: ${Math.round((this.scrollOffset / maxOffset) * 100)}% (${this.scrollOffset + 1}-${Math.min(contentLines.length, this.scrollOffset + maxViewLines)}/${contentLines.length})`
+		const scrollPercent = scrollableContentLines.length > maxViewLines
+			? ` · Scroll: ${Math.round((this.scrollOffset / maxOffset) * 100)}% (${this.scrollOffset + 1}-${Math.min(scrollableContentLines.length, this.scrollOffset + maxViewLines)}/${scrollableContentLines.length})`
 			: "";
 		const activeCount = this.activeDroppedIds.size;
 		const footerText = ` ${theme.fg("accent", "Jev Context Viewer")} · Active dropped: ${activeCount}${scrollPercent}`;
@@ -306,13 +310,13 @@ class ContextViewerComponent implements Component {
 		return lines;
 	}
 
-	private renderPurgedTab(lines: string[], width: number): void {
+	private renderPurgedTab(fixedHeader: string[], scrollableRows: string[], width: number): void {
 		const theme = this.theme;
 		if (!this.latestRun || this.latestRun.candidates.length === 0) {
-			lines.push("");
-			lines.push(theme.fg("muted", "  No candidates recorded in latest run."));
-			lines.push(theme.fg("dim", `  Active dropped in current session context: ${this.activeDroppedIds.size} pairs.`));
-			lines.push(theme.fg("dim", "  Run /jev dry or /jev to evaluate stale tool calls."));
+			scrollableRows.push("");
+			scrollableRows.push(theme.fg("muted", "  No candidates recorded in latest run."));
+			scrollableRows.push(theme.fg("dim", `  Active dropped in current session context: ${this.activeDroppedIds.size} pairs.`));
+			scrollableRows.push(theme.fg("dim", "  Run /jev dry or /jev to evaluate stale tool calls."));
 			return;
 		}
 
@@ -321,38 +325,45 @@ class ContextViewerComponent implements Component {
 			? theme.fg("warning", `[DRY RUN - ${this.latestRun.candidates.length} evaluated, none applied]`)
 			: theme.fg("success", `[APPLIED - ${this.activeDroppedIds.size} active prunes in context]`);
 
-		lines.push(theme.fg("muted", `  Run ID: ${this.latestRun.id} · Timestamp: ${this.latestRun.at} · ${modeBadge}`));
+		fixedHeader.push(theme.fg("muted", `  Run ID: ${this.latestRun.id} · Timestamp: ${this.latestRun.at} · ${modeBadge}`));
 		if (this.latestRun.goal) {
-			lines.push(theme.fg("dim", `  Goal: "${truncateToWidth(this.latestRun.goal.replace(/\n/g, " "), width - 12, "...")}"`));
+			fixedHeader.push(theme.fg("dim", `  Goal: "${truncateToWidth(this.latestRun.goal.replace(/\n/g, " "), width - 12, "...")}"`));
 		}
-		lines.push(theme.fg("dim", `  Active dropped in current session context: ${this.activeDroppedIds.size} pairs`));
-		lines.push("");
+		fixedHeader.push(theme.fg("dim", `  Active dropped in current session context: ${this.activeDroppedIds.size} pairs`));
+		fixedHeader.push("");
 
-		const inputWidth = Math.max(25, width - 68);
-		const header = `  #    ID             Tool       Input Summary` + " ".repeat(Math.max(0, inputWidth - 13)) + "  Orig Size  p(keep)  Status";
-		lines.push(theme.bold(header));
-		lines.push(theme.fg("borderMuted", "  " + "─".repeat(Math.min(width - 4, header.length - 2))));
+		const idWidth = 24;
+		const toolWidth = 14;
+		const sizeWidth = 10;
+		const probWidth = 8;
+		const statusWidth = 12;
+		const fixedTotal = 81;
+		const inputWidth = Math.max(30, width - fixedTotal);
+
+		const header = `  #    ID` + " ".repeat(idWidth - 2) + `Tool` + " ".repeat(toolWidth - 4) + `Input Summary` + " ".repeat(Math.max(0, inputWidth - 13)) + `  Orig Size  p(keep)  Status`;
+		fixedHeader.push(theme.bold(header));
+		fixedHeader.push(theme.fg("borderMuted", "  " + "─".repeat(Math.min(width - 4, header.length - 2))));
 
 		this.latestRun.candidates.forEach((cand, idx) => {
 			const num = String(idx + 1).padStart(3, "0");
-			const id = truncateToWidth(cand.toolCallId, 14).padEnd(14, " ");
-			const tool = cand.toolName.slice(0, 9).padEnd(9, " ");
+			const id = (cand.toolCallId.length > idWidth ? cand.toolCallId.slice(0, idWidth - 3) + "..." : cand.toolCallId).padEnd(idWidth, " ");
+			const tool = (cand.toolName.length > toolWidth ? cand.toolName.slice(0, toolWidth - 3) + "..." : cand.toolName).padEnd(toolWidth, " ");
 			const input = truncateToWidth(cand.inputSummary.replace(/\n/g, " "), inputWidth).padEnd(inputWidth, " ");
-			const size = formatBytes(cand.resultChars).padStart(9, " ");
-			const prob = cand.keepProbability.toFixed(2).padStart(7, " ");
+			const size = formatBytes(cand.resultChars).padStart(sizeWidth, " ");
+			const prob = cand.keepProbability.toFixed(2).padStart(probWidth, " ");
 			const status = isDry
-				? (cand.outcome === "drop" ? theme.fg("warning", "WOULD DROP") : theme.fg("success", "WOULD KEEP"))
-				: (cand.outcome === "drop" ? theme.fg("warning", "PURGED    ") : theme.fg("success", "KEPT      "));
-			lines.push(`  ${num}  ${theme.fg("muted", id)} ${theme.fg("accent", tool)} ${theme.fg("dim", input)}  ${size} ${prob}  ${status}`);
+				? (cand.outcome === "drop" ? theme.fg("warning", "WOULD DROP  ") : theme.fg("success", "WOULD KEEP  "))
+				: (cand.outcome === "drop" ? theme.fg("warning", "PURGED      ") : theme.fg("success", "KEPT        "));
+			scrollableRows.push(`  ${num}  ${theme.fg("muted", id)}  ${theme.fg("accent", tool)}  ${theme.fg("dim", input)}  ${size} ${prob}  ${status}`);
 		});
 	}
 
-	private renderContextTab(lines: string[], width: number): void {
+	private renderContextTab(fixedHeader: string[], scrollableRows: string[], width: number): void {
 		const theme = this.theme;
 		const pruned = applyPrunes(this.messages, this.activeDroppedIds) || this.messages;
 
-		lines.push(theme.fg("muted", `  Showing ${pruned.length} messages currently sent to model (${this.activeDroppedIds.size} pairs purged)`));
-		lines.push("");
+		fixedHeader.push(theme.fg("muted", `  Showing ${pruned.length} messages currently sent to model (${this.activeDroppedIds.size} pairs purged)`));
+		fixedHeader.push("");
 
 		pruned.forEach((msg, idx) => {
 			const role = msg.role;
@@ -362,39 +373,39 @@ class ContextViewerComponent implements Component {
 					? theme.fg("success", theme.bold(`[Assistant Message #${idx + 1}]`))
 					: theme.fg("muted", theme.bold(`[Tool Result #${idx + 1}: ${(msg as any).toolName || ""}]`));
 
-			lines.push(roleBadge);
+			scrollableRows.push(roleBadge);
 
 			if ("content" in msg) {
 				if (typeof msg.content === "string") {
 					for (const line of msg.content.split("\n")) {
-						lines.push(`  ${truncateToWidth(line, width - 4)}`);
+						scrollableRows.push(`  ${truncateToWidth(line, width - 4)}`);
 					}
 				} else if (Array.isArray(msg.content)) {
 					for (const block of msg.content) {
 						if (block.type === "text") {
 							if (block.text.startsWith("[jev: purged")) {
-								lines.push(`  ${theme.fg("warning", theme.bold(truncateToWidth(block.text, width - 4)))}`);
+								scrollableRows.push(`  ${theme.fg("warning", theme.bold(truncateToWidth(block.text, width - 4)))}`);
 							} else {
 								for (const line of block.text.split("\n")) {
-									lines.push(`  ${truncateToWidth(line, width - 4)}`);
+									scrollableRows.push(`  ${truncateToWidth(line, width - 4)}`);
 								}
 							}
 						} else if (block.type === "toolCall") {
-							lines.push(`  ${theme.fg("accent", `[toolCall: ${block.name}]`)} ${theme.fg("dim", JSON.stringify(block.arguments))}`);
+							scrollableRows.push(`  ${theme.fg("accent", `[toolCall: ${block.name}]`)} ${theme.fg("dim", JSON.stringify(block.arguments))}`);
 						} else if (block.type === "thinking") {
-							lines.push(`  ${theme.fg("dim", `[thinking: ${truncateToWidth(block.thinking.replace(/\n/g, " "), width - 16, "...")}]`)}`);
+							scrollableRows.push(`  ${theme.fg("dim", `[thinking: ${truncateToWidth(block.thinking.replace(/\n/g, " "), width - 16, "...")}]`)}`);
 						}
 					}
 				}
 			} else if (msg.role === "bashExecution") {
-				lines.push(`  $ ${truncateToWidth((msg as any).command || "", width - 6)}`);
+				scrollableRows.push(`  $ ${truncateToWidth((msg as any).command || "", width - 6)}`);
 				if ((msg as any).output) {
 					for (const line of ((msg as any).output as string).split("\n")) {
-						lines.push(`  ${truncateToWidth(line, width - 4)}`);
+						scrollableRows.push(`  ${truncateToWidth(line, width - 4)}`);
 					}
 				}
 			}
-			lines.push("");
+			scrollableRows.push("");
 		});
 	}
 
@@ -426,7 +437,7 @@ export async function openContextViewer(
 		},
 		{
 			overlay: true,
-			overlayOptions: { width: "85%", maxHeight: "80%", anchor: "center" },
+			overlayOptions: { width: "95%", maxHeight: "88%", anchor: "center" },
 		},
 	);
 }
