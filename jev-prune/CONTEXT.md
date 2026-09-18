@@ -362,7 +362,9 @@ Rebuild active context
 Apply active Jev dropped IDs
         │
         ▼
-Project structural token delta from Pi's `preparation.tokensBefore` baseline
+Scale Pi's `preparation.tokensBefore` baseline by the filtered/raw
+structural token ratio (`accounting.ts`'s `effectiveTokens` - the same
+proportional estimator status and run bookkeeping use)
         │
         ▼
 Use projected context + active model window + compaction settings

@@ -1,4 +1,3 @@
-import { estimateTokens } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { extractPairs, type Candidate } from "./candidates";
 
@@ -33,29 +32,4 @@ export function applyPrunes(messages: AgentMessage[], activeDroppedIds: Readonly
 	});
 
 	return changed ? result : undefined;
-}
-
-/** Pi's own per-message estimator, applied after the same structural projection. */
-export function estimateMessageTokens(messages: AgentMessage[]): number {
-	return messages.reduce((total, message) => total + estimateTokens(message), 0);
-}
-
-/**
- * Estimate effective tokens using proportional character reduction against
- * the model's observed context token count.
- */
-export function estimateProportionalTokens(
-	messages: AgentMessage[],
-	filtered: AgentMessage[],
-	observedTokens?: number | null,
-): number {
-	const rawTokens = estimateMessageTokens(messages);
-	const filteredTokens = estimateMessageTokens(filtered);
-	if (!Number.isFinite(rawTokens) || rawTokens <= 0) return filteredTokens;
-
-	const remainingRatio = Math.max(0, Math.min(1, filteredTokens / rawTokens));
-	if (observedTokens !== null && observedTokens !== undefined && Number.isFinite(observedTokens) && observedTokens > 0) {
-		return Math.round(observedTokens * remainingRatio);
-	}
-	return filteredTokens;
 }

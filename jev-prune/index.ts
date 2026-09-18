@@ -5,7 +5,8 @@ import {
 	type ExtensionCommandContext,
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { applyPrunes, estimateMessageTokens, estimateProportionalTokens } from "./apply";
+import { effectiveTokens, estimateMessageTokens, formatTokens } from "./accounting";
+import { applyPrunes } from "./apply";
 import { defaultGoal, eligibleCandidates, extractPairs, historyForJudgment } from "./candidates";
 import { createTypeSafeAsker, judgeCandidates, type RelevanceAsker } from "./judge";
 import {
@@ -98,10 +99,6 @@ function messagesForContext(ctx: ExtensionContext) {
 	return buildSessionContext(ctx.sessionManager.getEntries(), ctx.sessionManager.getLeafId()).messages;
 }
 
-function formatTokens(tokens: number): string {
-	return tokens >= 1_000 ? `${Math.round(tokens / 1_000)}k` : String(tokens);
-}
-
 function runId(): string {
 	return `jev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
@@ -112,18 +109,7 @@ function rawTokenEstimate(ctx: ExtensionContext, messages: ReturnType<typeof mes
 
 /** Status projection uses proportional scaling against observed usage. */
 function statusEffectiveTokenEstimate(ctx: ExtensionContext, messages: ReturnType<typeof messagesForContext>, filtered: ReturnType<typeof messagesForContext>): number {
-	return estimateProportionalTokens(messages, filtered, ctx.getContextUsage()?.tokens);
-}
-
-function projectedCompactionTokens(tokensBefore: unknown, messages: ReturnType<typeof messagesForContext>, filtered: ReturnType<typeof messagesForContext>): number | undefined {
-	if (!isFiniteNonNegative(tokensBefore)) return undefined;
-	const rawEstimate = estimateMessageTokens(messages);
-	const filteredEstimate = estimateMessageTokens(filtered);
-	if (!Number.isFinite(rawEstimate) || !Number.isFinite(filteredEstimate)) return undefined;
-	const structuralDelta = rawEstimate - filteredEstimate;
-	if (!Number.isFinite(structuralDelta) || structuralDelta < 0) return undefined;
-	const projected = tokensBefore - structuralDelta;
-	return Number.isFinite(projected) && projected >= 0 ? projected : undefined;
+	return effectiveTokens(messages, filtered, ctx.getContextUsage()?.tokens);
 }
 
 function statusText(ctx: ExtensionContext, messages: ReturnType<typeof messagesForContext>, activeDroppedIds: ReadonlySet<string>): string | undefined {
@@ -272,12 +258,13 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 	pi.on("session_before_compact", (event, ctx) => {
 		if (event.reason !== "threshold" || activeDroppedIds.size === 0 || !ctx.model) return;
 		try {
+			const tokensBefore = event.preparation.tokensBefore;
+			if (!isFiniteNonNegative(tokensBefore)) return;
 			const messages = messagesForContext(ctx);
 			const filtered = applyPrunes(messages, activeDroppedIds);
 			if (!filtered) return;
-			const effectiveTokens = projectedCompactionTokens(event.preparation.tokensBefore, messages, filtered);
-			if (effectiveTokens === undefined) return;
-			if (!shouldCompact(effectiveTokens, ctx.model.contextWindow, event.preparation.settings)) {
+			const projectedTokens = effectiveTokens(messages, filtered, tokensBefore);
+			if (!shouldCompact(projectedTokens, ctx.model.contextWindow, event.preparation.settings)) {
 				return { cancel: true };
 			}
 		} catch {

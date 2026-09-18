@@ -15,8 +15,13 @@ from provider context without rewriting Pi session history.
     turn pinning (default: 6 user turns), text extraction, and default goal/history builders.
   - `judge.ts`: bounded TypeSafe state fitting, Noul question construction,
     deterministic batching, and SDK adapter.
-  - `apply.ts`: reversible context rewriting, atomic pair removal, assistant
-    text placeholder insertion, and token estimation.
+  - `apply.ts`: reversible context rewriting, atomic pair removal, and
+    assistant text placeholder insertion.
+  - `accounting.ts`: single home for all token/size/cost estimation and
+    formatting (`estimateMessageTokens`, `effectiveTokens`, `formatTokens`,
+    `formatBytes`, `estimateCost`). Status, run bookkeeping, and the
+    compaction guard all route "effective tokens after prune" through
+    `effectiveTokens`, so there is exactly one accounting strategy.
   - `viewer.ts`: transcript entry renderer for inline cards and interactive TUI
     modal viewer overlay (`/jev view`).
   - `index.ts`: Pi extension factory, `/jev` command suite, lifecycle hooks,

@@ -271,6 +271,9 @@ describe("jev-prune", () => {
 	});
 
 	test("uses Pi preparation baseline, not footer usage, for threshold accounting", async () => {
+		// Guard must scale event.preparation.tokensBefore (200k), not the stubbed
+		// footer usage (contextTokens: 1); this fixture's heavy pruning ratio then
+		// projects the baseline well under the compaction threshold, so it cancels.
 		const compactionEntries = largeResultEntries();
 		const mounted = await mountWithAsker(fakeAsker(0.1));
 		const ctx = makeContext({ cwd: "/tmp/jev-prune", entries: compactionEntries, contextWindow: 128_000, contextTokens: 1 });
@@ -284,7 +287,30 @@ describe("jev-prune", () => {
 			},
 			ctx,
 		);
-		expect(result).toBeUndefined();
+		expect(result).toEqual({ cancel: true });
+	});
+
+	test("threshold guard uses proportional scaling, catching savings the old structural-delta math missed", async () => {
+		const compactionEntries = largeResultEntries();
+		const mounted = await mountWithAsker(fakeAsker(0.1));
+		const ctx = makeContext({ cwd: "/tmp/jev-prune", entries: compactionEntries, contextWindow: 128_000 });
+		await mounted.commands.jev?.("", ctx);
+
+		// tokensBefore=130_000: the old guard (tokensBefore - (rawEstimate - filteredEstimate),
+		// i.e. ~130_000 - 12_983 = ~117_017) stays above the 111_616 threshold (128k window -
+		// 16_384 reserve) and would NOT cancel. Proportional scaling projects ~1_308 tokens
+		// (130_000 * filtered/raw ratio) for this fixture's heavily-pruned pair, correctly
+		// recognizing pruning already keeps the session under the compaction threshold.
+		const result = await mounted.handlers.session_before_compact?.(
+			{
+				type: "session_before_compact",
+				reason: "threshold",
+				branchEntries: compactionEntries,
+				preparation: { tokensBefore: 130_000, settings: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 20_000 } },
+			},
+			ctx,
+		);
+		expect(result).toEqual({ cancel: true });
 	});
 
 	test("fails open when threshold accounting baseline is invalid", async () => {
