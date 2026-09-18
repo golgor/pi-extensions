@@ -1,10 +1,11 @@
 # CONTEXT.md — jev-prune
 
-> **Status: agreed design; implementation pending.**
+> **Status: v1 implementation.**
 >
-> This document defines intended v1 behavior. No `index.ts` exists yet, so none
-> of the commands or hooks below are currently registered. Update this status
-> and reconcile every behavioral claim with tests when implementation starts.
+> Factory-level tests cover candidate selection, dry/apply/reset behavior,
+> reversible context projection, branch restoration, failure safety, and
+> threshold-only compaction cancellation. Live TypeSafe judgment quality and
+> live provider payload inspection remain operator acceptance checks.
 
 ## Problem
 
@@ -191,9 +192,9 @@ A candidate is one complete tool-call/result pair identified by
 - Failed and successful pairs are both eligible. Jev receives an `is_error`
   fact, and a dropped failure remains visibly marked as failed in its
   placeholder.
-- Current and previous user turns are pinned. More precisely: scan user
-  messages backward; every message from the second-newest user message onward
-  is ineligible. If fewer than two user turns exist, all available work is
+- Recent user turns are pinned (default: 6 turns). More precisely: scan user
+  messages backward; every message from the sixth-newest user message onward
+  is ineligible. If fewer than six user turns exist, all available work is
   pinned.
 - Incomplete or structurally ambiguous pairs are retained rather than guessed
   about.
@@ -211,7 +212,7 @@ Jev—not Pi's current model, a subagent, or keyword matching—judges relevance
 the goal is assembled deterministically from:
 
 1. the opening user prompt; and
-2. the latest three user prompts.
+2. the latest six user prompts.
 
 Duplicate prompts are included once. The assembled goal is bounded to avoid
 letting goal text consume the state budget. Exact limits belong together in
@@ -297,9 +298,9 @@ Persist enough data to reconstruct:
 - active dropped IDs;
 - run ID and timestamp;
 - mode (`dry`, `applied`, `reset`);
-- goal used;
+- bounded goal used for the judgment;
 - each candidate's tool, bounded input summary, result character count,
-  `p(keep)`, outcome, and pin state where relevant;
+  `p(keep)`, and outcome;
 - estimated raw/effective context sizes and reduction;
 - TypeSafe token usage;
 - count of questions and requests.
@@ -360,7 +361,10 @@ Rebuild active context
 Apply active Jev dropped IDs
         │
         ▼
-Use Pi's estimator + active model context window + compaction settings
+Project structural token delta from Pi's `preparation.tokensBefore` baseline
+        │
+        ▼
+Use projected context + active model window + compaction settings
         │
         ├─ effective context fits ─────► return { cancel: true }
         │
@@ -372,8 +376,9 @@ Safety rules:
 - Only threshold-triggered compaction is eligible for cancellation.
 - Manual `/compact` is never canceled.
 - Overflow recovery is never canceled.
-- Missing model data, reconstruction failure, estimator failure, or any other
-  uncertainty allows Pi's native compaction.
+- Missing model data, an invalid `preparation.tokensBefore` baseline,
+  reconstruction failure, estimator failure, or any other uncertainty allows
+  Pi's native compaction.
 - This guard does not contact Jev. It only honors already-applied manual
   decisions.
 
@@ -405,9 +410,11 @@ While any dropped IDs affect active context, show an extension-owned status:
 Jev 31k / raw 70k · 17 purged
 ```
 
-- `raw` is Pi's message-context estimate.
-- `Jev` applies the same estimator after pair removal.
-- Both are estimates until provider usage is available.
+- `raw` uses Pi's observed context usage when available, otherwise Pi's
+  exported per-message estimator.
+- `Jev` estimates the structurally filtered messages and never reports less
+  than the observed raw usage minus its estimated removal.
+- Both remain estimates when provider usage is unavailable or stale.
 - Update after apply/reset, session or branch changes, and context changes.
 - Clear the footer when no active pair is being pruned.
 
@@ -422,21 +429,23 @@ or stale estimate; the extension footer remains explicit.
 Show:
 
 - active dropped count;
-- latest run ID/mode/time/goal;
+- latest run ID/mode/time/bounded goal;
 - raw and effective estimated context;
 - each latest-run candidate: stable ID, tool, bounded input summary,
-  `p(keep)`, outcome, result size, and pin status where relevant;
+  `p(keep)`, outcome, and result size;
 - TypeSafe usage and request count.
 
 ### `/jev history`
 
-The list view shows run ID, timestamp, mode, bounded goal, and dropped/eligible
-count. `/jev history <run-id>` shows the complete persisted diagnostics for
-that run.
+The list view shows run ID, timestamp, mode, bounded goal, dropped/eligible
+count, TypeSafe token usage, and request count. `/jev history <run-id>` shows
+complete persisted diagnostics for that run, including bounded input summaries
+but never result prefixes.
 
 Raw fallback: metadata lives in `custom` entries with the extension's
 `customType` inside Pi's session JSONL. Normal evaluation should use commands,
-not inspect JSONL manually. Never print TypeSafe payloads or API keys.
+not inspect JSONL manually. Never print raw TypeSafe request payloads or API
+keys.
 
 ## How to evaluate pruning quality
 
@@ -657,10 +666,10 @@ trust before pruning occurs without an explicit user action.
 ## Acceptance criteria for implementation
 
 1. `/jev dry` changes no provider context or active dropped IDs.
-2. `/jev` judges only complete, unpurged pairs older than two user turns.
+2. `/jev` judges only complete, unpurged pairs older than pinned user turns (default: 6).
 3. Selected call and result disappear together; one placeholder remains in
    the call's position.
-4. Current and previous user turns remain byte-for-byte unchanged.
+4. Pinned recent user turns remain byte-for-byte unchanged.
 5. Repeating `/jev` excludes already-dropped IDs.
 6. Restart and branch navigation reconstruct correct branch-local state.
 7. `/jev reset` restores all pairs still available in active context and
@@ -674,8 +683,9 @@ trust before pruning occurs without an explicit user action.
 13. Tests use a fake asker and a sanitized real-session fixture.
 14. Live acceptance starts with `/jev dry`, then `/jev`, then inspection of
     actual provider payload/message structure for pair integrity.
-15. TypeSafe payloads and API keys never appear in logs, persisted metadata,
-    toasts, status, or test fixtures.
+15. Raw TypeSafe request payloads, tool-result prefixes, and API keys never
+    appear in logs or test fixtures. Persisted diagnostics may contain the
+    bounded goal and tool-input summaries needed for evaluation.
 
 ## Parked work
 
