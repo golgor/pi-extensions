@@ -96,6 +96,30 @@ describe("jev-prune", () => {
 		expect(notifications.at(-1)?.message).toMatch(/^jev dry: would drop 1\/1 eligible pairs · context ~.+ from ~70k$/);
 	});
 
+	test("rejects a concurrent run while one is already in flight", async () => {
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		const deferredAsker = async (request: FakeAskRequest) => {
+			await gate;
+			return {
+				probabilities: Object.fromEntries(request.candidates.map((candidate) => [candidate.toolCallId, 0.1])),
+				usage: { inputTokens: 17, outputTokens: 2 },
+			};
+		};
+		const mounted = await mountExtension((pi) => jevPrune(pi, { ask: deferredAsker }));
+		const notifications: Array<{ message: string; type: string | undefined }> = [];
+		const ctx = makeContext({ cwd: "/tmp/jev-prune", entries, contextTokens: 70_000, notifications });
+
+		const first = mounted.commands.jev?.("", ctx);
+		await mounted.commands.jev?.("", ctx); // second lands while first still awaits the asker
+		expect(notifications.at(-1)).toMatchObject({ type: "warning" });
+		expect(notifications.at(-1)?.message).toMatch(/already in progress/);
+
+		release();
+		await first;
+		expect(mounted.appendedEntries).toHaveLength(1); // only the first run committed
+	});
+
 	test("retains structurally ambiguous pairs without sending them to Jev", async () => {
 		for (const kind of ["duplicate-call-id", "mismatched-tool-name", "result-before-call"] as const) {
 			const seen: string[] = [];

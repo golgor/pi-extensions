@@ -154,6 +154,7 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 	const ask = dependencies.ask ?? createTypeSafeAsker();
 	let activeDroppedIds = new Set<string>();
 	let runs: PersistedRun[] = [];
+	let runInFlight = false;
 
 	function restore(ctx: ExtensionContext) {
 		activeDroppedIds = new Set();
@@ -179,6 +180,13 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 	}
 
 	async function executeRun(mode: "dry" | "applied", focus: string, ctx: ExtensionCommandContext) {
+		// Serialize runs: a second /jev while one is awaiting Jev would waste a paid
+		// TypeSafe request and record a run judged against stale (pre-commit) state.
+		if (runInFlight) {
+			notify(ctx, "jev: a run is already in progress; wait for it to finish.", "warning");
+			return;
+		}
+		runInFlight = true;
 		const messages = messagesForContext(ctx);
 		const candidates = eligibleCandidates(messages, activeDroppedIds);
 		const goal = (focus || defaultGoal(messages)).slice(0, GOAL_LIMIT);
@@ -245,6 +253,8 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 				errorReason = "candidate state exceeds request token budget";
 			}
 			notify(ctx, `jev: no changes; ${errorReason}. Existing pruning state is unchanged.`, "error");
+		} finally {
+			runInFlight = false;
 		}
 	}
 
