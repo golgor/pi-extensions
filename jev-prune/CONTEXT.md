@@ -32,7 +32,8 @@ application.
 - **No replacement for Pi's native compaction.** Native `/compact` remains
   available and overflow recovery remains entirely Pi-owned.
 - **No generated summary.** Jev returns typed probabilities, not replacement
-  prose. User and assistant text stays verbatim.
+  prose. Existing user and assistant content stays verbatim; the extension may
+  insert its own purge placeholder text.
 - **No thinking-block pruning in v1.** Thinking is neither a candidate nor part
   of the state sent to TypeSafe.
 - **No failed-call archive in v1.** Recording failures for later system-prompt
