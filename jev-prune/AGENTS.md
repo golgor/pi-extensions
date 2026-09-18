@@ -17,6 +17,8 @@ from provider context without rewriting Pi session history.
     deterministic batching, and SDK adapter.
   - `apply.ts`: reversible context rewriting, atomic pair removal, assistant
     text placeholder insertion, and token estimation.
+  - `viewer.ts`: transcript entry renderer for inline cards and interactive TUI
+    modal viewer overlay (`/jev view`).
   - `index.ts`: Pi extension factory, `/jev` command suite, lifecycle hooks,
     native compaction shadow accounting, and custom entry persistence.
 - **Protocol pairing invariant**: never remove a tool call without its result

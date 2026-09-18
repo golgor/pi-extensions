@@ -51,6 +51,7 @@ application.
 ```text
 /jev [focus]           Judge eligible pairs and apply new purges
 /jev dry [focus]       Judge and record diagnostics without applying purges
+/jev view              Open interactive modal overlay (Purged Pairs + Active Context tabs)
 /jev status            Show active pruning state and latest run
 /jev history           List historical dry/applied runs on the active branch
 /jev history <run-id>  Show one run's candidate decisions and measurements
@@ -402,6 +403,30 @@ Dry example:
 jev dry: would drop 17/31 eligible pairs; estimated context ~31k from ~70k
 ```
 
+### Transcript entry cards
+
+When `/jev` (or `/jev dry` / `/jev reset`) runs, the extension persists a
+custom entry rendered inline in the chat transcript:
+
+- **Collapsed:** Boxed card with badge (`[jev applied]` or `[jev dry]`), token
+  reduction percentage, and `(Space or expand to view details)` hint.
+- **Expanded:** Displays timestamp, bounded goal, TypeSafe token usage + cost
+  estimate ($0.042/Mtok), and the table of candidates (`#`, `ID`, `Tool`,
+  `Input Summary`, `Size`, `p(keep)`, `Status`).
+
+### TUI Context Viewer Modal (`/jev view` or `/jev inspect`)
+
+Opens an 85% x 80% centered floating modal overlay:
+
+- **Tab 1 (Purged Pairs):** Scrollable table of all candidates from the latest
+  run, displaying tool names, input summaries, original result sizes, keep
+  probabilities, and drop/keep outcomes.
+- **Tab 2 (Active Context):** Formatted turn-by-turn chat stream of the active
+  messages currently sent to the model, highlighting `[jev: purged ...]`
+  placeholders.
+- **Navigation:** `Tab` switches tabs, `↑`/`↓`/`j`/`k`/`PgUp`/`PgDn` scrolls,
+  `Esc`/`q` dismisses.
+
 ### Footer
 
 While any dropped IDs affect active context, show an extension-owned status:
@@ -549,6 +574,7 @@ jev-prune/
 ├── candidates.ts   Pair extraction, turn pinning, eligibility
 ├── judge.ts        State fitting, Noul questions, batching, decisions
 ├── apply.ts        Pair removal, placeholders, effective-size projection
+├── viewer.ts       Transcript entry renderer and TUI modal overlay
 ├── index.test.ts   Factory-level behavior tests via shared harness
 └── CONTEXT.md      This design record
 ```
