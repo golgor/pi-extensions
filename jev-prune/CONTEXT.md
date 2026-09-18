@@ -362,7 +362,9 @@ Rebuild active context
 Apply active Jev dropped IDs
         │
         ▼
-Project structural token delta from Pi's `preparation.tokensBefore` baseline
+Scale Pi's `preparation.tokensBefore` baseline by the filtered/raw
+structural token ratio (`accounting.ts`'s `effectiveTokens` - the same
+proportional estimator status and run bookkeeping use)
         │
         ▼
 Use projected context + active model window + compaction settings
@@ -437,8 +439,9 @@ Jev 31k / raw 70k · 17 purged
 
 - `raw` uses Pi's observed context usage when available, otherwise Pi's
   exported per-message estimator.
-- `Jev` estimates the structurally filtered messages and never reports less
-  than the observed raw usage minus its estimated removal.
+- `Jev` scales the observed raw usage by the filtered/raw structural ratio
+  (`accounting.effectiveTokens`); the status footer and the compaction guard
+  use that one estimator.
 - Both remain estimates when provider usage is unavailable or stale.
 - Update after apply/reset, session or branch changes, and context changes.
 - Clear the footer when no active pair is being pruned.
@@ -570,12 +573,15 @@ small interfaces, high locality, and tests crossing the same seams callers do.
 
 ```text
 jev-prune/
-├── index.ts        Pi factory, commands, persistence, lifecycle, UI
+├── index.ts        Pi factory, commands, persistence I/O, lifecycle, UI
 ├── candidates.ts   Pair extraction, turn pinning, eligibility
 ├── judge.ts        State fitting, Noul questions, batching, decisions
-├── apply.ts        Pair removal, placeholders, effective-size projection
+├── apply.ts        Pair removal and placeholder insertion
+├── accounting.ts   Token/size/cost estimation and formatting (one strategy)
+├── record.ts       Persisted run-record schema, validators, formatters
 ├── viewer.ts       Transcript entry renderer and TUI modal overlay
 ├── index.test.ts   Factory-level behavior tests via shared harness
+├── accounting.test.ts  Accounting-module unit tests
 └── CONTEXT.md      This design record
 ```
 
@@ -604,8 +610,10 @@ Relevance asker
 Dependencies are accepted rather than created inside judgment logic. Candidate
 selection, decision policy, and transformation return data instead of producing
 side effects. `index.ts` owns Pi side effects and orchestration. Persistence
-stays there in v1 rather than becoming a shallow pass-through module; extract
-it only if a second real caller creates a useful seam.
+I/O (`appendEntry`) stays there; the run-record schema, validators, and
+formatters live in `record.ts` because both `index.ts` and `viewer.ts` read
+them — the second caller that justifies the seam. Token/size/cost accounting
+lives in `accounting.ts` for the same reason.
 
 Tests still mount the real default extension factory per repository convention.
 Internal pure modules support locality, but exported test-only implementation

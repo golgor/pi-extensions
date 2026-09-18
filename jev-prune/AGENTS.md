@@ -15,12 +15,21 @@ from provider context without rewriting Pi session history.
     turn pinning (default: 6 user turns), text extraction, and default goal/history builders.
   - `judge.ts`: bounded TypeSafe state fitting, Noul question construction,
     deterministic batching, and SDK adapter.
-  - `apply.ts`: reversible context rewriting, atomic pair removal, assistant
-    text placeholder insertion, and token estimation.
+  - `apply.ts`: reversible context rewriting, atomic pair removal, and
+    assistant text placeholder insertion.
+  - `accounting.ts`: single home for all token/size/cost estimation and
+    formatting (`estimateMessageTokens`, `effectiveTokens`, `formatTokens`,
+    `formatBytes`, `estimateCost`). Status, run bookkeeping, and the
+    compaction guard all route "effective tokens after prune" through
+    `effectiveTokens`, so there is exactly one accounting strategy.
+  - `record.ts`: persisted run-record schema (`PersistedState`/`PersistedRun`/
+    `PersistedCandidate`), its validators, bound constants, and text formatters
+    (`formatRun`/`formatCandidates`), read by both `index.ts` and `viewer.ts`.
   - `viewer.ts`: transcript entry renderer for inline cards and interactive TUI
     modal viewer overlay (`/jev view`).
   - `index.ts`: Pi extension factory, `/jev` command suite, lifecycle hooks,
-    native compaction shadow accounting, and custom entry persistence.
+    native compaction shadow accounting, and custom entry persistence I/O
+    (the record schema, validators, and formatters live in `record.ts`).
 - **Protocol pairing invariant**: never remove a tool call without its result
   or vice versa. Ambiguous or incomplete pairs are always retained.
 - **Session immutability**: Pi session JSONL is strictly append-only and never

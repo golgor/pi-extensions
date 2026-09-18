@@ -5,101 +5,33 @@ import {
 	type ExtensionCommandContext,
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { applyPrunes, estimateMessageTokens, estimateProportionalTokens } from "./apply";
+import { effectiveTokens, estimateMessageTokens, formatTokens } from "./accounting";
+import { applyPrunes } from "./apply";
 import { defaultGoal, eligibleCandidates, extractPairs, historyForJudgment } from "./candidates";
 import { createTypeSafeAsker, judgeCandidates, type RelevanceAsker } from "./judge";
 import {
-	createEntryRenderer,
-	openContextViewer,
+	formatCandidates,
+	formatRun,
+	GOAL_LIMIT,
+	INPUT_SUMMARY_LIMIT,
+	isFiniteNonNegative,
+	isPersistedState,
 	type PersistedCandidate,
 	type PersistedRun,
 	type PersistedState,
-} from "./viewer";
+	VERSION,
+} from "./record";
+import { createEntryRenderer, openContextViewer } from "./viewer";
 
 const CUSTOM_TYPE = "jev-prune";
 const STATUS_KEY = "jev-prune";
-const VERSION = 1;
-const GOAL_LIMIT = 4_000;
-const INPUT_SUMMARY_LIMIT = 240;
 
 interface Dependencies {
 	ask?: RelevanceAsker;
 }
 
-function isFiniteNonNegative(value: unknown): value is number {
-	return typeof value === "number" && Number.isFinite(value) && value >= 0;
-}
-
-function isRunMode(value: unknown): value is PersistedRun["mode"] {
-	return value === "dry" || value === "applied" || value === "reset";
-}
-
-function isPersistedCandidate(value: unknown): value is PersistedCandidate {
-	if (!value || typeof value !== "object") return false;
-	const candidate = value as Partial<PersistedCandidate>;
-	return (
-		typeof candidate.toolCallId === "string" &&
-		candidate.toolCallId.length > 0 &&
-		typeof candidate.toolName === "string" &&
-		candidate.toolName.length > 0 &&
-		typeof candidate.inputSummary === "string" &&
-		candidate.inputSummary.length <= INPUT_SUMMARY_LIMIT &&
-		isFiniteNonNegative(candidate.inputChars) &&
-		isFiniteNonNegative(candidate.resultChars) &&
-		typeof candidate.isError === "boolean" &&
-		typeof candidate.keepProbability === "number" &&
-		Number.isFinite(candidate.keepProbability) &&
-		candidate.keepProbability >= 0 &&
-		candidate.keepProbability <= 1 &&
-		(candidate.outcome === "keep" || candidate.outcome === "drop")
-	);
-}
-
-function isPersistedRun(value: unknown): value is PersistedRun {
-	if (!value || typeof value !== "object") return false;
-	const run = value as Partial<PersistedRun>;
-	const hasValidGoal = run.goal === undefined || (typeof run.goal === "string" && run.goal.length <= GOAL_LIMIT);
-	const requiresGoal = run.mode === "dry" || run.mode === "applied";
-	return (
-		typeof run.id === "string" &&
-		run.id.length > 0 &&
-		typeof run.at === "string" &&
-		Number.isFinite(Date.parse(run.at)) &&
-		isRunMode(run.mode) &&
-		hasValidGoal &&
-		(!requiresGoal || typeof run.goal === "string") &&
-		Array.isArray(run.candidates) &&
-		run.candidates.every(isPersistedCandidate) &&
-		isFiniteNonNegative(run.rawTokens) &&
-		isFiniteNonNegative(run.effectiveTokens) &&
-		Boolean(run.usage) &&
-		isFiniteNonNegative(run.usage?.inputTokens) &&
-		isFiniteNonNegative(run.usage?.outputTokens) &&
-		typeof run.requestCount === "number" &&
-		Number.isInteger(run.requestCount) &&
-		run.requestCount >= 0
-	);
-}
-
-function isPersistedState(value: unknown): value is PersistedState {
-	if (!value || typeof value !== "object") return false;
-	const state = value as Partial<PersistedState>;
-	return (
-		state.version === VERSION &&
-		isRunMode(state.mode) &&
-		Array.isArray(state.activeDroppedIds) &&
-		state.activeDroppedIds.every((id) => typeof id === "string" && id.length > 0) &&
-		isPersistedRun(state.run) &&
-		state.mode === state.run.mode
-	);
-}
-
 function messagesForContext(ctx: ExtensionContext) {
 	return buildSessionContext(ctx.sessionManager.getEntries(), ctx.sessionManager.getLeafId()).messages;
-}
-
-function formatTokens(tokens: number): string {
-	return tokens >= 1_000 ? `${Math.round(tokens / 1_000)}k` : String(tokens);
 }
 
 function runId(): string {
@@ -112,37 +44,13 @@ function rawTokenEstimate(ctx: ExtensionContext, messages: ReturnType<typeof mes
 
 /** Status projection uses proportional scaling against observed usage. */
 function statusEffectiveTokenEstimate(ctx: ExtensionContext, messages: ReturnType<typeof messagesForContext>, filtered: ReturnType<typeof messagesForContext>): number {
-	return estimateProportionalTokens(messages, filtered, ctx.getContextUsage()?.tokens);
-}
-
-function projectedCompactionTokens(tokensBefore: unknown, messages: ReturnType<typeof messagesForContext>, filtered: ReturnType<typeof messagesForContext>): number | undefined {
-	if (!isFiniteNonNegative(tokensBefore)) return undefined;
-	const rawEstimate = estimateMessageTokens(messages);
-	const filteredEstimate = estimateMessageTokens(filtered);
-	if (!Number.isFinite(rawEstimate) || !Number.isFinite(filteredEstimate)) return undefined;
-	const structuralDelta = rawEstimate - filteredEstimate;
-	if (!Number.isFinite(structuralDelta) || structuralDelta < 0) return undefined;
-	const projected = tokensBefore - structuralDelta;
-	return Number.isFinite(projected) && projected >= 0 ? projected : undefined;
+	return effectiveTokens(messages, filtered, ctx.getContextUsage()?.tokens);
 }
 
 function statusText(ctx: ExtensionContext, messages: ReturnType<typeof messagesForContext>, activeDroppedIds: ReadonlySet<string>): string | undefined {
 	const filtered = applyPrunes(messages, activeDroppedIds);
 	if (!filtered) return undefined;
 	return `Jev ${formatTokens(statusEffectiveTokenEstimate(ctx, messages, filtered))} / raw ${formatTokens(rawTokenEstimate(ctx, messages))} · ${activeDroppedIds.size} purged`;
-}
-
-function formatRun(run: PersistedRun): string {
-	const dropped = run.candidates.filter((candidate) => candidate.outcome === "drop").length;
-	const goal = run.goal ? `; goal: ${run.goal}` : "";
-	const requestLabel = run.requestCount === 1 ? "request" : "requests";
-	return `${run.id} ${run.at} ${run.mode}: ${dropped}/${run.candidates.length} dropped; ${formatTokens(run.effectiveTokens)} from ${formatTokens(run.rawTokens)}; usage ${run.usage.inputTokens} in / ${run.usage.outputTokens} out; ${run.requestCount} ${requestLabel}${goal}`;
-}
-
-function formatCandidates(run: PersistedRun): string {
-	return run.candidates
-		.map((candidate) => `${candidate.toolCallId} ${candidate.toolName}: input ${candidate.inputSummary} (${candidate.inputChars} chars), result ${candidate.resultChars} chars, p(keep)=${candidate.keepProbability.toFixed(2)} ${candidate.outcome}`)
-		.join("\n");
 }
 
 /**
@@ -272,12 +180,16 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 	pi.on("session_before_compact", (event, ctx) => {
 		if (event.reason !== "threshold" || activeDroppedIds.size === 0 || !ctx.model) return;
 		try {
+			const tokensBefore = event.preparation.tokensBefore;
+			// A non-positive baseline is a degenerate preparation value: fail open so
+			// effectiveTokens never falls back to the small filtered estimate and
+			// wrongly cancels native compaction.
+			if (!isFiniteNonNegative(tokensBefore) || tokensBefore <= 0) return;
 			const messages = messagesForContext(ctx);
 			const filtered = applyPrunes(messages, activeDroppedIds);
 			if (!filtered) return;
-			const effectiveTokens = projectedCompactionTokens(event.preparation.tokensBefore, messages, filtered);
-			if (effectiveTokens === undefined) return;
-			if (!shouldCompact(effectiveTokens, ctx.model.contextWindow, event.preparation.settings)) {
+			const projectedTokens = effectiveTokens(messages, filtered, tokensBefore);
+			if (!shouldCompact(projectedTokens, ctx.model.contextWindow, event.preparation.settings)) {
 				return { cancel: true };
 			}
 		} catch {
@@ -285,46 +197,69 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 		}
 	});
 
-	pi.registerCommand("jev", {
-		description: "Manually judge and reversibly prune stale tool-call/result pairs with Jev",
-		getArgumentCompletions: (prefix) => {
-			const subcommands = [
-				{ value: "dry", label: "dry", description: "Preview what would be pruned without changing context" },
-				{ value: "view", label: "view", description: "Open the interactive modal: purged pairs + active context" },
-				{ value: "inspect", label: "inspect", description: "Alias for /jev view" },
-				{ value: "status", label: "status", description: "Show current pruning state and latest run summary" },
-				{ value: "history", label: "history", description: "List all recorded runs on this branch" },
-				{ value: "reset", label: "reset", description: "Restore all pruned pairs to the context" },
-			];
-			const normalized = prefix.trim().toLowerCase();
-			return subcommands.filter((item) => item.value.startsWith(normalized));
+	/** Shared by the "view" and "inspect" subcommands (inspect is a plain alias). */
+	async function runViewer(ctx: ExtensionCommandContext) {
+		const messages = messagesForContext(ctx);
+		const latest = runs.at(-1);
+		await openContextViewer(ctx, messages, activeDroppedIds, latest);
+	}
+
+	// Single source for the /jev subcommand set: both getArgumentCompletions and
+	// the dispatch handler below derive from this table so the two can't drift.
+	const subcommands: Array<{
+		name: string;
+		description: string;
+		/** Whether trailing text after the name is a parameter (dry/history) vs. disqualifying (falls through to the applied run, as today). */
+		acceptsArgument: boolean;
+		run: (ctx: ExtensionCommandContext, rest: string) => void | Promise<void>;
+	}> = [
+		{
+			name: "dry",
+			description: "Preview what would be pruned without changing context",
+			acceptsArgument: true,
+			run: (ctx, rest) => executeRun("dry", rest, ctx),
 		},
-		handler: async (args, ctx) => {
-			const input = args.trim();
-			if (input === "view" || input === "inspect") {
-				const messages = messagesForContext(ctx);
-				const latest = runs.at(-1);
-				await openContextViewer(ctx, messages, activeDroppedIds, latest);
-				return;
-			}
-			if (input === "status") {
+		{
+			name: "view",
+			description: "Open the interactive modal: purged pairs + active context",
+			acceptsArgument: false,
+			run: runViewer,
+		},
+		{
+			name: "inspect",
+			description: "Alias for /jev view",
+			acceptsArgument: false,
+			run: runViewer,
+		},
+		{
+			name: "status",
+			description: "Show current pruning state and latest run summary",
+			acceptsArgument: false,
+			run: (ctx) => {
 				const messages = messagesForContext(ctx);
 				const latest = runs.at(-1);
 				const current = statusText(ctx, messages, activeDroppedIds) ?? "Jev inactive";
 				notify(ctx, latest ? `${current}\n${formatRun(latest)}${latest.candidates.length > 0 ? `\n${formatCandidates(latest)}` : ""}` : current);
-				return;
-			}
-			if (input === "history") {
-				notify(ctx, runs.length === 0 ? "jev: no recorded runs on this branch." : runs.map(formatRun).join("\n"));
-				return;
-			}
-			if (input.startsWith("history ")) {
-				const id = input.slice("history ".length).trim();
-				const run = runs.find((item) => item.id === id);
-				notify(ctx, run ? `${formatRun(run)}${run.candidates.length > 0 ? `\n${formatCandidates(run)}` : ""}` : `jev: no run named ${id}.`, run ? "info" : "warning");
-				return;
-			}
-			if (input === "reset") {
+			},
+		},
+		{
+			name: "history",
+			description: "List all recorded runs on this branch",
+			acceptsArgument: true,
+			run: (ctx, rest) => {
+				if (rest === "") {
+					notify(ctx, runs.length === 0 ? "jev: no recorded runs on this branch." : runs.map(formatRun).join("\n"));
+					return;
+				}
+				const run = runs.find((item) => item.id === rest);
+				notify(ctx, run ? `${formatRun(run)}${run.candidates.length > 0 ? `\n${formatCandidates(run)}` : ""}` : `jev: no run named ${rest}.`, run ? "info" : "warning");
+			},
+		},
+		{
+			name: "reset",
+			description: "Restore all pruned pairs to the context",
+			acceptsArgument: false,
+			run: async (ctx) => {
 				const messages = messagesForContext(ctx);
 				const availableIds = new Set(extractPairs(messages).map((candidate) => candidate.toolCallId));
 				const restored = [...activeDroppedIds].filter((id) => availableIds.has(id)).length;
@@ -348,14 +283,30 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 				} catch {
 					notify(ctx, "jev: reset failed; existing pruning state is unchanged.", "error");
 				}
+			},
+		},
+	];
+
+	pi.registerCommand("jev", {
+		description: "Manually judge and reversibly prune stale tool-call/result pairs with Jev",
+		getArgumentCompletions: (prefix) => {
+			const normalized = prefix.trim().toLowerCase();
+			return subcommands
+				.filter((item) => item.name.startsWith(normalized))
+				.map((item) => ({ value: item.name, label: item.name, description: item.description }));
+		},
+		handler: async (args, ctx) => {
+			const input = args.trim();
+			const spaceIndex = input.indexOf(" ");
+			const head = spaceIndex === -1 ? input : input.slice(0, spaceIndex);
+			const rest = spaceIndex === -1 ? "" : input.slice(spaceIndex + 1).trim();
+			const subcommand = head ? subcommands.find((item) => item.name === head) : undefined;
+			if (subcommand && (subcommand.acceptsArgument || rest === "")) {
+				await subcommand.run(ctx, rest);
 				return;
 			}
 			if (input === "restore" || input.startsWith("restore ")) {
 				notify(ctx, "jev: per-call restore is not available in v1; use /jev reset.", "warning");
-				return;
-			}
-			if (input === "dry" || input.startsWith("dry ")) {
-				await executeRun("dry", input.slice("dry".length).trim(), ctx);
 				return;
 			}
 			await executeRun("applied", input, ctx);

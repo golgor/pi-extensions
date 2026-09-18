@@ -271,6 +271,9 @@ describe("jev-prune", () => {
 	});
 
 	test("uses Pi preparation baseline, not footer usage, for threshold accounting", async () => {
+		// Guard must scale event.preparation.tokensBefore (200k), not the stubbed
+		// footer usage (contextTokens: 1); this fixture's heavy pruning ratio then
+		// projects the baseline well under the compaction threshold, so it cancels.
 		const compactionEntries = largeResultEntries();
 		const mounted = await mountWithAsker(fakeAsker(0.1));
 		const ctx = makeContext({ cwd: "/tmp/jev-prune", entries: compactionEntries, contextWindow: 128_000, contextTokens: 1 });
@@ -284,7 +287,30 @@ describe("jev-prune", () => {
 			},
 			ctx,
 		);
-		expect(result).toBeUndefined();
+		expect(result).toEqual({ cancel: true });
+	});
+
+	test("threshold guard uses proportional scaling, catching savings the old structural-delta math missed", async () => {
+		const compactionEntries = largeResultEntries();
+		const mounted = await mountWithAsker(fakeAsker(0.1));
+		const ctx = makeContext({ cwd: "/tmp/jev-prune", entries: compactionEntries, contextWindow: 128_000 });
+		await mounted.commands.jev?.("", ctx);
+
+		// tokensBefore=130_000: the old guard (tokensBefore - (rawEstimate - filteredEstimate),
+		// i.e. ~130_000 - 12_983 = ~117_017) stays above the 111_616 threshold (128k window -
+		// 16_384 reserve) and would NOT cancel. Proportional scaling projects ~1_308 tokens
+		// (130_000 * filtered/raw ratio) for this fixture's heavily-pruned pair, correctly
+		// recognizing pruning already keeps the session under the compaction threshold.
+		const result = await mounted.handlers.session_before_compact?.(
+			{
+				type: "session_before_compact",
+				reason: "threshold",
+				branchEntries: compactionEntries,
+				preparation: { tokensBefore: 130_000, settings: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 20_000 } },
+			},
+			ctx,
+		);
+		expect(result).toEqual({ cancel: true });
 	});
 
 	test("fails open when threshold accounting baseline is invalid", async () => {
@@ -292,16 +318,21 @@ describe("jev-prune", () => {
 		const mounted = await mountWithAsker(fakeAsker(0.1));
 		const ctx = makeContext({ cwd: "/tmp/jev-prune", entries: compactionEntries, contextWindow: 128_000 });
 		await mounted.commands.jev?.("", ctx);
-		const result = await mounted.handlers.session_before_compact?.(
-			{
-				type: "session_before_compact",
-				reason: "threshold",
-				branchEntries: compactionEntries,
-				preparation: { tokensBefore: Number.NaN, settings: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 20_000 } },
-			},
-			ctx,
-		);
-		expect(result).toBeUndefined();
+		// NaN and a non-positive baseline are both degenerate: without the guard, a
+		// zero baseline makes effectiveTokens fall back to the tiny filtered estimate
+		// and wrongly cancel native compaction. Both must fail open.
+		for (const tokensBefore of [Number.NaN, 0, -1]) {
+			const result = await mounted.handlers.session_before_compact?.(
+				{
+					type: "session_before_compact",
+					reason: "threshold",
+					branchEntries: compactionEntries,
+					preparation: { tokensBefore, settings: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 20_000 } },
+				},
+				ctx,
+			);
+			expect(result).toBeUndefined();
+		}
 	});
 
 	test("asker failure leaves active state unchanged", async () => {
@@ -429,6 +460,24 @@ describe("jev-prune", () => {
 		customModalComponent.handleInput("j");
 		customModalComponent.handleInput("k");
 		customModalComponent.handleInput("q");
+	});
+
+	test("completions and dispatch derive from the same subcommand set", async () => {
+		const seen: string[] = [];
+		const mounted = await mountWithAsker(fakeAsker(0.1, seen));
+		const complete = mounted.commandCompletions.jev;
+		const names = (await complete("")).map((item: { value: string }) => item.value);
+		expect(names).toEqual(["dry", "view", "inspect", "status", "history", "reset"]);
+
+		const ctx = makeContext({ cwd: "/tmp/jev-prune", entries });
+		for (const name of names) {
+			if (name === "dry") continue; // dry intentionally forwards to the judged run, covered elsewhere
+			await mounted.commands.jev?.(name, ctx);
+		}
+		expect(seen).toEqual([]); // every non-dry completion name has its own dispatch entry, none fell through to the judged "applied" path
+
+		await mounted.commands.jev?.("unknown-command", ctx);
+		expect(seen).toEqual(["read-old"]); // a name absent from the table still falls through to the judged run, proving the fallback is reachable only outside the table
 	});
 
 	test("exposes subcommand argument completions with descriptions", async () => {

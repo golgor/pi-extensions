@@ -18,54 +18,9 @@ import {
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 import { applyPrunes } from "./apply";
+import { estimateCost, formatBytes, formatTokens } from "./accounting";
 import { textFromContent } from "./candidates";
-
-export interface PersistedCandidate {
-	toolCallId: string;
-	toolName: string;
-	inputSummary: string;
-	inputChars: number;
-	resultChars: number;
-	isError: boolean;
-	keepProbability: number;
-	outcome: "keep" | "drop";
-}
-
-export interface PersistedRun {
-	id: string;
-	at: string;
-	mode: "dry" | "applied" | "reset";
-	goal?: string;
-	candidates: PersistedCandidate[];
-	rawTokens: number;
-	effectiveTokens: number;
-	usage: { inputTokens: number; outputTokens: number };
-	requestCount: number;
-}
-
-export interface PersistedState {
-	version: number;
-	mode: PersistedRun["mode"];
-	activeDroppedIds: string[];
-	run: PersistedRun;
-}
-
-function formatTokens(tokens: number): string {
-	return tokens >= 1_000 ? `${Math.round(tokens / 1_000)}k` : String(tokens);
-}
-
-function formatBytes(chars: number): string {
-	if (chars >= 1_000_000) return `${(chars / 1_000_000).toFixed(1)} MB`;
-	if (chars >= 1_000) return `${(chars / 1_000).toFixed(1)} KB`;
-	return `${chars} B`;
-}
-
-function estimateCost(inputTokens: number): string {
-	const cost = (inputTokens / 1_000_000) * 0.042;
-	if (cost < 0.0001) return "<$0.0001";
-	if (cost < 0.01) return `$${cost.toFixed(4)}`;
-	return `$${cost.toFixed(3)}`;
-}
+import type { PersistedCandidate, PersistedRun, PersistedState } from "./record";
 
 /**
  * Register entry renderer for inline transcript cards.
