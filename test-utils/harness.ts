@@ -21,7 +21,7 @@
  *   );
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 
 // biome-ignore lint/suspicious/noExplicitAny: handlers accept whatever event/result shape their event type uses
 type AnyHandler = (event: any, ctx: ExtensionContext) => unknown | Promise<unknown>;
@@ -34,6 +34,12 @@ export interface MountedExtension {
 	handlers: Record<string, AnyHandler>;
 	/** Slash-command handlers registered via `pi.registerCommand`, keyed by name. */
 	commands: Record<string, AnyCommandHandler>;
+	/** Argument-completion providers registered per command, keyed by name. */
+	commandCompletions: Record<string, (prefix: string) => any>;
+	/** Extension-owned custom entries appended during the test. */
+	appendedEntries: Array<{ customType: string; data: unknown }>;
+	/** Custom entry renderers registered via `pi.registerEntryRenderer`. */
+	entryRenderers: Record<string, (entry: any, options: { expanded: boolean }, theme: any) => any>;
 }
 
 /**
@@ -49,19 +55,29 @@ export async function mountExtension(
 ): Promise<MountedExtension> {
 	const handlers: Record<string, AnyHandler> = {};
 	const commands: Record<string, AnyCommandHandler> = {};
+	const commandCompletions: Record<string, (prefix: string) => any> = {};
+	const appendedEntries: Array<{ customType: string; data: unknown }> = [];
+	const entryRenderers: Record<string, (entry: any, options: { expanded: boolean }, theme: any) => any> = {};
 
 	const fakePi = {
 		on(event: string, handler: AnyHandler) {
 			handlers[event] = handler;
 		},
-		registerCommand(name: string, options: { handler: AnyCommandHandler }) {
+		registerCommand(name: string, options: { handler: AnyCommandHandler; getArgumentCompletions?: (prefix: string) => any }) {
 			commands[name] = options.handler;
+			if (options.getArgumentCompletions) commandCompletions[name] = options.getArgumentCompletions;
+		},
+		appendEntry(customType: string, data: unknown) {
+			appendedEntries.push({ customType, data });
+		},
+		registerEntryRenderer(customType: string, renderer: any) {
+			entryRenderers[customType] = renderer;
 		},
 		...extras,
 	} as unknown as ExtensionAPI;
 
 	await factory(fakePi);
-	return { handlers, commands };
+	return { handlers, commands, commandCompletions, appendedEntries, entryRenderers };
 }
 
 /** Builds a fake `pi.exec` from a matcher: return stdout for a given command+args, or throw/undefined. */
@@ -93,17 +109,69 @@ export interface FakeContextOptions {
 	hasUI?: boolean;
 	/** What `ctx.ui.confirm(...)` resolves to when a UI is available. Default: true. */
 	confirm?: boolean;
+	/** Active branch entries exposed through the read-only session manager. */
+	entries?: SessionEntry[];
+	/** Active model context window used by compaction handlers. Default: 128k. */
+	contextWindow?: number;
+	/** Current raw context token estimate. */
+	contextTokens?: number | null;
+	/** Captures status/footer values set by an extension. */
+	statuses?: Map<string, string | undefined>;
+	/** Captures UI notifications emitted by an extension. */
+	notifications?: Array<{ message: string; type: string | undefined }>;
+	/** Mock handler for ctx.ui.custom components. */
+	onCustomUI?: (factory: Function, options?: any) => any;
 }
 
-/** Builds a minimal fake `ExtensionContext` sufficient for testing tool_call handlers. */
+/** Builds a minimal fake `ExtensionContext` with branch-backed session reads. */
 export function makeContext(options: FakeContextOptions): ExtensionContext {
-	const { cwd, hasUI = true, confirm = true } = options;
+	const {
+		cwd,
+		hasUI = true,
+		confirm = true,
+		entries = [],
+		contextWindow = 128_000,
+		contextTokens = null,
+		statuses = new Map(),
+		notifications = [],
+		onCustomUI,
+	} = options;
+
+	const theme = {
+		fg: (_color: string, text: string) => text,
+		bg: (_color: string, text: string) => text,
+		bold: (text: string) => text,
+		dim: (text: string) => text,
+		italic: (text: string) => text,
+	};
+
 	return {
 		cwd,
 		hasUI,
+		mode: "tui",
+		model: { contextWindow },
+		getContextUsage: () => ({ tokens: contextTokens, contextWindow, percent: null }),
+		sessionManager: {
+			getEntries: () => entries,
+			getBranch: () => entries,
+			getLeafId: () => entries.at(-1)?.id ?? null,
+		},
 		ui: {
+			theme,
 			confirm: async () => confirm,
-			notify: () => {},
+			notify: (message: string, type?: string) => notifications.push({ message, type }),
+			setStatus: (key: string, text: string | undefined) => statuses.set(key, text),
+			custom: async (factoryOrOptions: any, maybeOptions?: any) => {
+				const factory = typeof factoryOrOptions === "function" ? factoryOrOptions : maybeOptions;
+				const opts = typeof factoryOrOptions === "function" ? maybeOptions : factoryOrOptions;
+				if (onCustomUI) return onCustomUI(factory, opts);
+				let result: any;
+				const done = (val: any) => { result = val; };
+				const tui = { requestRender: () => {} };
+				const keybindings = {};
+				const comp = factory(tui, theme, keybindings, done);
+				return result ?? comp;
+			},
 		},
 	} as unknown as ExtensionContext;
 }

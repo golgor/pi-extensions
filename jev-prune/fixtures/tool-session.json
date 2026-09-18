@@ -1,0 +1,164 @@
+[
+  {
+    "type": "message",
+    "id": "u1",
+    "parentId": null,
+    "timestamp": "2026-01-01T00:00:00.000Z",
+    "message": { "role": "user", "content": "Inspect sample project and report stale reads.", "timestamp": 1767225600000 }
+  },
+  {
+    "type": "message",
+    "id": "a1",
+    "parentId": "u1",
+    "timestamp": "2026-01-01T00:00:01.000Z",
+    "message": {
+      "role": "assistant",
+      "content": [
+        { "type": "text", "text": "I will inspect configuration." },
+        { "type": "toolCall", "id": "read-old", "name": "read", "arguments": { "path": "sample.config" } }
+      ],
+      "api": "test",
+      "provider": "test",
+      "model": "test",
+      "usage": { "input": 1, "output": 1, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 2, "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 } },
+      "stopReason": "toolUse",
+      "timestamp": 1767225601000
+    }
+  },
+  {
+    "type": "message",
+    "id": "r1",
+    "parentId": "a1",
+    "timestamp": "2026-01-01T00:00:02.000Z",
+    "message": { "role": "toolResult", "toolCallId": "read-old", "toolName": "read", "content": [{ "type": "text", "text": "stale setting alpha=true\nmore stale data" }], "isError": false, "timestamp": 1767225602000 }
+  },
+  {
+    "type": "message",
+    "id": "u2",
+    "parentId": "r1",
+    "timestamp": "2026-01-01T00:00:03.000Z",
+    "message": { "role": "user", "content": "Turn 2: prepare settings migration.", "timestamp": 1767225603000 }
+  },
+  {
+    "type": "message",
+    "id": "a2",
+    "parentId": "u2",
+    "timestamp": "2026-01-01T00:00:04.000Z",
+    "message": {
+      "role": "assistant",
+      "content": [{ "type": "text", "text": "Prepared step 2." }],
+      "api": "test",
+      "provider": "test",
+      "model": "test",
+      "usage": { "input": 1, "output": 1, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 2, "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 } },
+      "stopReason": "stop",
+      "timestamp": 1767225604000
+    }
+  },
+  {
+    "type": "message",
+    "id": "u3",
+    "parentId": "a2",
+    "timestamp": "2026-01-01T00:00:05.000Z",
+    "message": { "role": "user", "content": "Turn 3: verify migration plan.", "timestamp": 1767225605000 }
+  },
+  {
+    "type": "message",
+    "id": "a3",
+    "parentId": "u3",
+    "timestamp": "2026-01-01T00:00:06.000Z",
+    "message": {
+      "role": "assistant",
+      "content": [{ "type": "text", "text": "Verified plan." }],
+      "api": "test",
+      "provider": "test",
+      "model": "test",
+      "usage": { "input": 1, "output": 1, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 2, "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 } },
+      "stopReason": "stop",
+      "timestamp": 1767225606000
+    }
+  },
+  {
+    "type": "message",
+    "id": "u4",
+    "parentId": "a3",
+    "timestamp": "2026-01-01T00:00:07.000Z",
+    "message": { "role": "user", "content": "Turn 4: check dependencies.", "timestamp": 1767225607000 }
+  },
+  {
+    "type": "message",
+    "id": "a4",
+    "parentId": "u4",
+    "timestamp": "2026-01-01T00:00:08.000Z",
+    "message": {
+      "role": "assistant",
+      "content": [{ "type": "text", "text": "Dependencies checked." }],
+      "api": "test",
+      "provider": "test",
+      "model": "test",
+      "usage": { "input": 1, "output": 1, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 2, "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 } },
+      "stopReason": "stop",
+      "timestamp": 1767225608000
+    }
+  },
+  {
+    "type": "message",
+    "id": "u5",
+    "parentId": "a4",
+    "timestamp": "2026-01-01T00:00:09.000Z",
+    "message": { "role": "user", "content": "Turn 5: update database tables.", "timestamp": 1767225609000 }
+  },
+  {
+    "type": "message",
+    "id": "a5",
+    "parentId": "u5",
+    "timestamp": "2026-01-01T00:00:10.000Z",
+    "message": {
+      "role": "assistant",
+      "content": [{ "type": "text", "text": "Updated tables." }],
+      "api": "test",
+      "provider": "test",
+      "model": "test",
+      "usage": { "input": 1, "output": 1, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 2, "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 } },
+      "stopReason": "stop",
+      "timestamp": 1767225610000
+    }
+  },
+  {
+    "type": "message",
+    "id": "u6",
+    "parentId": "a5",
+    "timestamp": "2026-01-01T00:00:11.000Z",
+    "message": { "role": "user", "content": "Turn 6: now read current settings.", "timestamp": 1767225611000 }
+  },
+  {
+    "type": "message",
+    "id": "a6",
+    "parentId": "u6",
+    "timestamp": "2026-01-01T00:00:12.000Z",
+    "message": {
+      "role": "assistant",
+      "content": [{ "type": "toolCall", "id": "read-current", "name": "read", "arguments": { "path": "current.config" } }],
+      "api": "test",
+      "provider": "test",
+      "model": "test",
+      "usage": { "input": 1, "output": 1, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 2, "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 } },
+      "stopReason": "toolUse",
+      "timestamp": 1767225612000
+    }
+  },
+  {
+    "type": "message",
+    "id": "r6",
+    "parentId": "a6",
+    "timestamp": "2026-01-01T00:00:13.000Z",
+    "message": { "role": "toolResult", "toolCallId": "read-current", "toolName": "read", "content": [{ "type": "text", "text": "current setting beta=false" }], "isError": false, "timestamp": 1767225613000 }
+  },
+  {
+    "type": "message",
+    "id": "u7",
+    "parentId": "r6",
+    "timestamp": "2026-01-01T00:00:14.000Z",
+    "message": { "role": "user", "content": "Turn 7: Only change beta and leave earlier work alone.", "timestamp": 1767225614000 }
+  }
+]

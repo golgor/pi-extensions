@@ -26,9 +26,10 @@ built-in test runner (`bun:test`, Jest-compatible API) auto-discovers every
 `*.test.ts` file in the repo, so tests live colocated with the extension
 they cover (e.g. `fs-guard/index.test.ts`) and double as behavior docs.
 
-The only dependency, `@earendil-works/pi-coding-agent`, is a `devDependency`
-used for types and to exercise extension code in tests — at real runtime,
-Pi itself provides this module; extensions in this repo never bundle it.
+`@earendil-works/pi-coding-agent` is a `devDependency` used for types and to
+exercise extension code in tests — at real runtime, Pi itself provides this
+module. `jev-prune` additionally uses the root runtime dependency
+`@typesafe-ai/sdk`; Pi resolves it from this shared root `node_modules`.
 
 ## Extensions
 
@@ -41,6 +42,13 @@ Pi itself provides this module; extensions in this repo never bundle it.
   as a browser star-map, served on loopback. Frontend vendored from
   [rengwu/wayfinder-maps](https://github.com/rengwu/wayfinder-maps) (MIT).
   See `wayfinder-map/CONTEXT.md` for design decisions and limitations.
+- [`jev-prune/`](./jev-prune) — manual `/jev` relevance judgments remove stale
+  complete tool-call/result pairs from provider context without rewriting Pi
+  session history. Run `/jev dry` first, then inspect `/jev status`,
+  `/jev history`, or open the interactive modal with `/jev view` before
+  applying `/jev`. It sends bounded active text, tool inputs, and result
+  prefixes to TypeSafe AI; invoke it only when that disclosure is appropriate.
+  Requires `TYPESAFE_API_KEY`.
 
 ## Adding a new extension
 
@@ -52,3 +60,13 @@ Pi itself provides this module; extensions in this repo never bundle it.
 ```
 
 Then run `mise run setup` to register it.
+
+## Jev prune evaluation
+
+Start manually with `/jev dry [focus]`. Check `/jev status` for current
+estimated savings, `/jev history` for recorded probabilities, or `/jev view`
+for the interactive modal viewer (Purged Pairs table + Active Context stream).
+Apply only with `/jev [focus]` once dry decisions look safe; `/jev reset`
+removes active pruning decisions for pairs still available in current Pi
+context. See [`jev-prune/CONTEXT.md`](./jev-prune/CONTEXT.md) for limits,
+diagnostics, and native-compaction behavior.
