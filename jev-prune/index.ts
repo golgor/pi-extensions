@@ -279,13 +279,12 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 		description: "Manually judge and reversibly prune stale tool-call/result pairs with Jev",
 		getArgumentCompletions: (prefix) => {
 			const subcommands = [
-				{ value: "", label: "jev <focus>", description: "Judge and prune stale pairs (optional focus overrides the goal)" },
-				{ value: "dry", label: "jev dry", description: "Preview what would be pruned without changing context" },
-				{ value: "view", label: "jev view", description: "Open the interactive modal: purged pairs + active context" },
-				{ value: "inspect", label: "jev inspect", description: "Alias for /jev view" },
-				{ value: "status", label: "jev status", description: "Show current pruning state and latest run summary" },
-				{ value: "history", label: "jev history", description: "List all recorded runs on this branch" },
-				{ value: "reset", label: "jev reset", description: "Restore all pruned pairs to the context" },
+				{ value: "dry", label: "dry", description: "Preview what would be pruned without changing context" },
+				{ value: "view", label: "view", description: "Open the interactive modal: purged pairs + active context" },
+				{ value: "inspect", label: "inspect", description: "Alias for /jev view" },
+				{ value: "status", label: "status", description: "Show current pruning state and latest run summary" },
+				{ value: "history", label: "history", description: "List all recorded runs on this branch" },
+				{ value: "reset", label: "reset", description: "Restore all pruned pairs to the context" },
 			];
 			const normalized = prefix.trim().toLowerCase();
 			return subcommands.filter((item) => item.value.startsWith(normalized));

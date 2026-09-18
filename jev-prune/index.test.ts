@@ -413,7 +413,8 @@ describe("jev-prune", () => {
 		expect(complete).toBeDefined();
 
 		const all = await complete("");
-		expect(all.map((item: { value: string }) => item.value)).toEqual(["", "dry", "view", "inspect", "status", "history", "reset"]);
+		expect(all.map((item: { value: string }) => item.value)).toEqual(["dry", "view", "inspect", "status", "history", "reset"]);
+		expect(all.every((item: { value: string }) => item.value.length > 0)).toBe(true);
 		expect(all.every((item: { description?: string }) => typeof item.description === "string" && item.description.length > 0)).toBe(true);
 
 		expect((await complete("d")).map((item: { value: string }) => item.value)).toEqual(["dry"]);
