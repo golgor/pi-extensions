@@ -202,31 +202,32 @@ class ContextViewerComponent implements Component {
 			return;
 		}
 
-		if (matchesKey(data, Key.ctrl("u")) || data === "b") {
-			this.scrollOffset = Math.max(0, this.scrollOffset - 12);
+		if (matchesKey(data, Key.pageUp) || matchesKey(data, Key.ctrl("u")) || data === "b") {
+			this.scrollOffset = Math.max(0, this.scrollOffset - 20);
 			this.invalidate();
 			this.requestRender();
 			return;
 		}
 
-		if (matchesKey(data, Key.ctrl("d")) || data === " " || data === "f") {
-			this.scrollOffset += 12;
+		if (matchesKey(data, Key.pageDown) || matchesKey(data, Key.ctrl("d")) || data === " " || data === "f") {
+			this.scrollOffset += 20;
 			this.invalidate();
 			this.requestRender();
 			return;
 		}
 
-		if (data === "g" || matchesKey(data, Key.home)) {
+		if (matchesKey(data, Key.home) || data === "g") {
 			this.scrollOffset = 0;
 			this.invalidate();
 			this.requestRender();
 			return;
 		}
 
-		if (data === "G" || matchesKey(data, Key.end)) {
-			this.scrollOffset = 9999;
+		if (matchesKey(data, Key.end) || data === "G") {
+			this.scrollOffset = 999999;
 			this.invalidate();
 			this.requestRender();
+			return;
 		}
 	}
 
@@ -253,7 +254,7 @@ class ContextViewerComponent implements Component {
 			? theme.bg("selectedBg", theme.bold(theme.fg("accent", tab2Label)))
 			: theme.fg("muted", tab2Label);
 
-		const headerLine = ` ${tab1Styled}  ${tab2Styled}   ${theme.fg("dim", "[Tab: Switch view • ↑↓/j/k: Scroll • Esc/q: Close]")}`;
+		const headerLine = ` ${tab1Styled}  ${tab2Styled}   ${theme.fg("dim", "[Tab: Switch • ↑↓/jk: Scroll • PgUp/PgDn: Page • Home/End: Top/Bottom • Esc/q: Close]")}`;
 		lines.push(truncateToWidth(headerLine, width));
 		lines.push(truncateToWidth("─".repeat(width), width));
 
