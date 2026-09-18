@@ -181,7 +181,10 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 		if (event.reason !== "threshold" || activeDroppedIds.size === 0 || !ctx.model) return;
 		try {
 			const tokensBefore = event.preparation.tokensBefore;
-			if (!isFiniteNonNegative(tokensBefore)) return;
+			// A non-positive baseline is a degenerate preparation value: fail open so
+			// effectiveTokens never falls back to the small filtered estimate and
+			// wrongly cancels native compaction.
+			if (!isFiniteNonNegative(tokensBefore) || tokensBefore <= 0) return;
 			const messages = messagesForContext(ctx);
 			const filtered = applyPrunes(messages, activeDroppedIds);
 			if (!filtered) return;

@@ -318,16 +318,21 @@ describe("jev-prune", () => {
 		const mounted = await mountWithAsker(fakeAsker(0.1));
 		const ctx = makeContext({ cwd: "/tmp/jev-prune", entries: compactionEntries, contextWindow: 128_000 });
 		await mounted.commands.jev?.("", ctx);
-		const result = await mounted.handlers.session_before_compact?.(
-			{
-				type: "session_before_compact",
-				reason: "threshold",
-				branchEntries: compactionEntries,
-				preparation: { tokensBefore: Number.NaN, settings: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 20_000 } },
-			},
-			ctx,
-		);
-		expect(result).toBeUndefined();
+		// NaN and a non-positive baseline are both degenerate: without the guard, a
+		// zero baseline makes effectiveTokens fall back to the tiny filtered estimate
+		// and wrongly cancel native compaction. Both must fail open.
+		for (const tokensBefore of [Number.NaN, 0, -1]) {
+			const result = await mounted.handlers.session_before_compact?.(
+				{
+					type: "session_before_compact",
+					reason: "threshold",
+					branchEntries: compactionEntries,
+					preparation: { tokensBefore, settings: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 20_000 } },
+				},
+				ctx,
+			);
+			expect(result).toBeUndefined();
+		}
 	});
 
 	test("asker failure leaves active state unchanged", async () => {
