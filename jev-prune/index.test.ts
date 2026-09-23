@@ -58,6 +58,20 @@ function largeResultEntries(): SessionEntry[] {
 	return copy;
 }
 
+function contextEditedEntries(): SessionEntry[] {
+	return [
+		...entries,
+		{
+			type: "context_edit",
+			id: "edit-1",
+			parentId: "u7",
+			timestamp: "2026-01-01T00:00:15.000Z",
+			targetId: "r1",
+			replacement: null,
+		},
+	];
+}
+
 function ambiguityEntries(kind: "duplicate-call-id" | "mismatched-tool-name" | "result-before-call"): SessionEntry[] {
 	const copy = structuredClone(entries) as SessionEntry[];
 	const assistant = copy.find((entry) => entry.id === "a1") as Extract<SessionEntry, { type: "message" }>;
@@ -118,6 +132,27 @@ describe("jev-prune", () => {
 		release();
 		await first;
 		expect(mounted.appendedEntries).toHaveLength(1); // only the first run committed
+	});
+
+	test("sanitizes lone surrogates before sending state to Jev", async () => {
+		const dirty = structuredClone(entries) as SessionEntry[];
+		const result = dirty.find((entry) => entry.id === "r1") as Extract<SessionEntry, { type: "message" }>;
+		// A lone high surrogate, as slice() can leave when it cuts an emoji in half.
+		(result.message as { content: Array<{ type: "text"; text: string }> }).content = [{ type: "text", text: "stale \uD83D output" }];
+		let capturedState: unknown;
+		const ask = async (request: { state: unknown; candidates: Array<{ toolCallId: string }> }) => {
+			capturedState = request.state;
+			return {
+				probabilities: Object.fromEntries(request.candidates.map((candidate) => [candidate.toolCallId, 0.1])),
+				usage: { inputTokens: 1, outputTokens: 1 },
+			};
+		};
+		const mounted = await mountExtension((pi) => jevPrune(pi, { ask }));
+		const ctx = makeContext({ cwd: "/tmp/jev-prune", entries: dirty });
+
+		await mounted.commands.jev?.("dry", ctx);
+		// JSON.stringify escapes an unpaired surrogate as \udxxx; U+FFFD does not match.
+		expect(JSON.stringify(capturedState)).not.toMatch(/\\ud[89ab][0-9a-f]{2}/i);
 	});
 
 	test("retains structurally ambiguous pairs without sending them to Jev", async () => {
@@ -183,6 +218,20 @@ describe("jev-prune", () => {
 		expect(notifications.at(-1)?.message).toContain("p(keep)=0.10 drop");
 		expect(notifications.at(-1)?.message).toContain("usage 17 in / 2 out; 1 request");
 		expect(notifications.at(-1)?.message).not.toContain("stale setting alpha");
+	});
+
+	test("uses Pi's canonical projection when context edits omit a message", async () => {
+		const seen: string[] = [];
+		const editedEntries = contextEditedEntries();
+		const editedMessages = buildSessionContext(editedEntries).messages;
+		expect(editedMessages.some((message) => message.role === "toolResult" && message.toolCallId === "read-old")).toBe(false);
+
+		const mounted = await mountWithAsker(fakeAsker(0.1, seen));
+		const ctx = makeContext({ cwd: "/tmp/jev-prune", entries: editedEntries });
+
+		await mounted.commands.jev?.("dry", ctx);
+		expect(seen).toEqual([]);
+		expect(mounted.appendedEntries[0]?.data).toMatchObject({ mode: "dry", activeDroppedIds: [] });
 	});
 
 	test("restores branch-local active IDs on session start", async () => {
@@ -349,6 +398,23 @@ describe("jev-prune", () => {
 		await mounted.commands.jev?.("", ctx);
 		expect(mounted.appendedEntries).toHaveLength(0);
 		expect(notifications.at(-1)?.message).toContain("jev: no changes");
+		expect(notifications.at(-1)?.message).toContain("Error: offline");
+	});
+
+	test("explains TypeSafe context-limit failures without changing state", async () => {
+		const mounted = await mountExtension((pi) =>
+			jevPrune(pi, {
+				ask: async () => {
+					throw new Error('400 {"detail":{"error_type":"max_tokens_exceeded"}}');
+				},
+			}),
+		);
+		const notifications: Array<{ message: string; type: string | undefined }> = [];
+		const ctx = makeContext({ cwd: "/tmp/jev-prune", entries, notifications });
+
+		await mounted.commands.jev?.("", ctx);
+		expect(mounted.appendedEntries).toHaveLength(0);
+		expect(notifications.at(-1)?.message).toContain("TypeSafe request exceeds its context limit");
 	});
 
 	test("malformed Jev answers preserve state and do not leak candidate payloads", async () => {

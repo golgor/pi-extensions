@@ -30,6 +30,10 @@ from provider context without rewriting Pi session history.
   - `index.ts`: Pi extension factory, `/jev` command suite, lifecycle hooks,
     native compaction shadow accounting, and custom entry persistence I/O
     (the record schema, validators, and formatters live in `record.ts`).
+- **Canonical context projection**: derive command, status, viewer, and
+  compaction inputs from `ctx.sessionManager.buildSessionProjection().messages`.
+  This applies Pi's compaction and branch-local `context_edit` entries; do not
+  reconstruct provider context from mutable agent state or raw entries.
 - **Protocol pairing invariant**: never remove a tool call without its result
   or vice versa. Ambiguous or incomplete pairs are always retained.
 - **Session immutability**: Pi session JSONL is strictly append-only and never

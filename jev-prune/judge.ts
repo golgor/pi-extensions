@@ -2,8 +2,11 @@ import { noul, TypeSafeClient } from "@typesafe-ai/sdk";
 import type { JsonValue } from "@typesafe-ai/sdk";
 import type { Candidate } from "./candidates";
 
-const MAX_STATE_TOKENS = 25_000;
-const MAX_REQUEST_TOKENS = 30_000;
+// TypeSafe documents 32k for state + longest question and 64k total. Keep
+// Jev well below those caps because JSON character estimates undercount code,
+// paths, and structured tool data.
+const MAX_STATE_TOKENS = 16_000;
+const MAX_REQUEST_TOKENS = 20_000;
 const KEEP_THRESHOLD = 0.5;
 
 export interface JudgeState {
@@ -39,20 +42,27 @@ export interface JudgmentRun {
 }
 
 function estimatedTokens(value: unknown): number {
-	return Math.ceil(JSON.stringify(value).length / 4);
+	return Math.ceil(JSON.stringify(value).length / 3);
+}
+
+// Bounded text is truncated with slice(), which can split a UTF-16 surrogate
+// pair mid-codepoint and leave a lone surrogate. TypeSafe rejects such payloads
+// with "invalid Unicode text", so replace unpaired surrogates with U+FFFD.
+function sanitizeUnicode(text: string): string {
+	return text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
 }
 
 function stateFor(goal: string, history: JudgeState["history"], candidates: Candidate[]): JudgeState {
 	return {
-		goal,
-		history,
+		goal: sanitizeUnicode(goal),
+		history: history.map((entry) => ({ role: entry.role, text: sanitizeUnicode(entry.text) })),
 		calls: Object.fromEntries(
 			candidates.map((candidate) => [
 				candidate.toolCallId,
 				{
-					tool: candidate.toolName,
-					input: candidate.input.slice(0, 1_000),
-					result_head: candidate.resultHead,
+					tool: sanitizeUnicode(candidate.toolName),
+					input: sanitizeUnicode(candidate.input.slice(0, 1_000)),
+					result_head: sanitizeUnicode(candidate.resultHead),
 					is_error: candidate.isError,
 				},
 			]),
@@ -61,7 +71,7 @@ function stateFor(goal: string, history: JudgeState["history"], candidates: Cand
 }
 
 function questionText(candidate: Candidate): string {
-	return `Does calls.${candidate.toolCallId} need to remain visible to continue the stated goal correctly? Answer yes only when this complete ${candidate.toolName} tool-call/result pair contains evidence still needed for the goal; answer no when it is stale and can be replaced by a purge marker.`;
+	return `Does calls.${candidate.toolCallId} need to remain visible to continue the stated goal correctly? Answer yes only when this complete ${sanitizeUnicode(candidate.toolName)} tool-call/result pair contains evidence still needed for the goal; answer no when it is stale and can be replaced by a purge marker.`;
 }
 
 function batches(goal: string, history: JudgeState["history"], candidates: Candidate[]): Array<{ state: JudgeState; candidates: Candidate[] }> {
@@ -103,6 +113,7 @@ export function createTypeSafeAsker(): RelevanceAsker {
 				}),
 			]),
 		);
+		// SAFETY: JudgeState is composed only of JSON-compatible strings, booleans, arrays, and records.
 		const response = await client.systemOne({ model: "jev-latest", state: state as unknown as { [key: string]: JsonValue }, questions }, { signal });
 		const probabilities: Record<string, number> = {};
 		for (const candidate of candidates) {

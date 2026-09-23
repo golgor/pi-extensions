@@ -1,5 +1,4 @@
 import {
-	buildSessionContext,
 	shouldCompact,
 	type ExtensionAPI,
 	type ExtensionCommandContext,
@@ -31,7 +30,7 @@ interface Dependencies {
 }
 
 function messagesForContext(ctx: ExtensionContext) {
-	return buildSessionContext(ctx.sessionManager.getEntries(), ctx.sessionManager.getLeafId()).messages;
+	return ctx.sessionManager.buildSessionProjection().messages;
 }
 
 function runId(): string {
@@ -151,14 +150,18 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 		} catch (error: any) {
 			let errorReason = "judgment failed";
 			const msg = typeof error?.message === "string" ? error.message : "";
+			const safeMsg = process.env.TYPESAFE_API_KEY ? msg.replaceAll(process.env.TYPESAFE_API_KEY, "<redacted>") : msg;
+			const errorName = typeof error?.name === "string" ? error.name : "request error";
 			if (!process.env.TYPESAFE_API_KEY || msg.includes("No API key was provided")) {
 				errorReason = "missing TYPESAFE_API_KEY environment variable";
 			} else if (error?.status === 401 || msg.includes("AuthenticationError") || msg.includes("authentication failed")) {
 				errorReason = "TypeSafe authentication failed (check TYPESAFE_API_KEY)";
 			} else if (error?.status === 429 || msg.includes("RateLimitError") || msg.includes("rate limit")) {
 				errorReason = "TypeSafe rate limit reached; retry shortly";
-			} else if (msg.includes("state budget")) {
-				errorReason = "candidate state exceeds request token budget";
+			} else if (msg.includes("state budget") || msg.includes("max_tokens_exceeded") || msg.includes("context length")) {
+				errorReason = "TypeSafe request exceeds its context limit; Jev will need smaller batches";
+			} else if (safeMsg) {
+				errorReason = `${errorName}: ${safeMsg.slice(0, 240)}`;
 			}
 			notify(ctx, `jev: no changes; ${errorReason}. Existing pruning state is unchanged.`, "error");
 		} finally {

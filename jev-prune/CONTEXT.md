@@ -2,6 +2,11 @@
 
 > **Status: v1 implementation.**
 >
+> Targets Pi 0.87.0. Provider context comes from
+> `ctx.sessionManager.buildSessionProjection().messages`, so Pi's native
+> compaction and branch-local `context_edit` entries are applied before Jev
+> evaluates or displays context.
+>
 > Factory-level tests cover candidate selection, dry/apply/reset behavior,
 > reversible context projection, branch restoration, failure safety, and
 > threshold-only compaction cancellation. Live TypeSafe judgment quality and
@@ -72,9 +77,11 @@ v1 acceptance.
 
 ### Two views of one session
 
-Pi's session file remains the durable source of truth. The extension persists
-only decisions keyed by stable `toolCallId`. Immediately before a provider
-request, Pi's `context` event supplies a deep copy of messages. The extension
+Pi's session file remains the durable source of truth. Pi's
+`SessionManager` builds the canonical compaction-aware projection, including
+branch-local `context_edit` entries. The extension persists only decisions
+keyed by stable `toolCallId`. Immediately before a provider request, Pi's
+`context` event supplies a deep copy of conversation messages; the extension
 rewrites that copy and leaves the session untouched.
 
 ```text
@@ -265,17 +272,23 @@ must contain complete meaning because Jev does not see the identifier itself.
 All independent questions that fit are sent together so Jev ingests shared
 state once. Oversized candidate sets are batched deterministically.
 
+Bounded text is truncated with `slice()`, which can split a UTF-16 surrogate
+pair and leave a lone surrogate. TypeSafe rejects such payloads with "invalid
+Unicode text", so every string placed into state or a question is sanitized to
+replace unpaired surrogates with U+FFFD before the request is built.
+
 ### Budgets
 
-Initial safety budgets:
+TypeSafe currently documents a 64k budget for state plus all questions and a
+32k budget for state plus the longest question. Jev uses conservative local
+budgets because its JSON character estimator undercounts structured tool data:
 
-- state: 25k estimated tokens;
-- state plus questions per request: 30k estimated tokens;
+- state: 16k estimated tokens;
+- state plus questions per request: 20k estimated tokens;
 - result prefix: 200 characters per candidate.
 
-These deliberately stay below TypeSafe's documented limits. State fitting is
-deterministic. If required goal/candidate identity cannot fit safely, fail the
-run without changing active pruning state.
+State fitting is deterministic. If required goal/candidate identity cannot fit
+safely, fail the run without changing active pruning state.
 
 TypeSafe limits and pricing can change. Re-read live documentation before
 implementation or later budget changes:
@@ -535,7 +548,9 @@ Failures pass through safely.
 Missing key, TypeSafe/API failure, malformed answers, abort, state-fitting
 failure, adapter error, or persistence failure must:
 
-- notify the user clearly;
+- notify the user clearly, including a bounded adapter error detail when it is
+  not a known authentication, rate-limit, or budget failure; API key text is
+  redacted;
 - apply no new dropped IDs;
 - preserve previous active state;
 - leave provider context otherwise untouched;
