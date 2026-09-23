@@ -2,7 +2,7 @@
   "name": "pi-extensions",
   "private": true,
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.80.6"
+    "@earendil-works/pi-coding-agent": "0.87.0"
   },
   "dependencies": {
     "@typesafe-ai/sdk": "^0.6.0"

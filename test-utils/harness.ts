@@ -21,7 +21,7 @@
  *   );
  */
 
-import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
+import { buildSessionProjection, type ExtensionAPI, type ExtensionContext, type SessionEntry } from "@earendil-works/pi-coding-agent";
 
 // biome-ignore lint/suspicious/noExplicitAny: handlers accept whatever event/result shape their event type uses
 type AnyHandler = (event: any, ctx: ExtensionContext) => unknown | Promise<unknown>;
@@ -59,6 +59,7 @@ export async function mountExtension(
 	const appendedEntries: Array<{ customType: string; data: unknown }> = [];
 	const entryRenderers: Record<string, (entry: any, options: { expanded: boolean }, theme: any) => any> = {};
 
+	// SAFETY: test harness implements only the ExtensionAPI surface exercised by mounted extensions.
 	const fakePi = {
 		on(event: string, handler: AnyHandler) {
 			handlers[event] = handler;
@@ -145,6 +146,7 @@ export function makeContext(options: FakeContextOptions): ExtensionContext {
 		italic: (text: string) => text,
 	};
 
+	// SAFETY: test context implements only the ExtensionContext surface exercised by extensions.
 	return {
 		cwd,
 		hasUI,
@@ -155,6 +157,7 @@ export function makeContext(options: FakeContextOptions): ExtensionContext {
 			getEntries: () => entries,
 			getBranch: () => entries,
 			getLeafId: () => entries.at(-1)?.id ?? null,
+			buildSessionProjection: () => buildSessionProjection(entries, entries.at(-1)?.id ?? null),
 		},
 		ui: {
 			theme,
