@@ -2,7 +2,7 @@
 
 > **Status: v1 implementation.**
 >
-> Targets Pi 0.87.0. Provider context comes from
+> Targets Pi 1.1.0. Provider context comes from
 > `ctx.sessionManager.buildSessionProjection().messages`, so Pi's native
 > compaction and branch-local `context_edit` entries are applied before Jev
 > evaluates or displays context.
