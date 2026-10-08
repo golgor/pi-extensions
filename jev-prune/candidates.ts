@@ -1,4 +1,5 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { estimateTokens } from "@earendil-works/pi-coding-agent";
 
 export interface Candidate {
 	toolCallId: string;
@@ -107,24 +108,49 @@ export function extractPairs(messages: AgentMessage[]): Candidate[] {
 	return pairs;
 }
 
-export const PINNED_USER_TURNS = 6;
+/** The current and previous user turns are always pinned. */
+export const PINNED_USER_TURNS = 2;
+/** Recent prompts the default goal is built from. */
+const GOAL_RECENT_PROMPTS = 6;
 
-/** Oldest index of Pi's pinned recent user turns (default: 6 turns). */
-export function pinnedStartIndex(messages: AgentMessage[], pinnedTurns = PINNED_USER_TURNS): number {
+export interface PinPolicy {
+	/** Newest user turns that are never pruned. */
+	userTurns: number;
+	/** Newest estimated tokens that are never pruned (Pi's compaction keepRecentTokens). */
+	recentTokens: number;
+}
+
+/** Oldest index of the newest `turns` user turns; everything is pinned when fewer exist. */
+function userTurnStartIndex(messages: AgentMessage[], turns: number): number {
 	const userIndices = messages
 		.map((message, index) => (message.role === "user" ? index : -1))
 		.filter((index) => index >= 0);
-	if (userIndices.length < pinnedTurns) return 0;
-	return userIndices.at(-pinnedTurns)!;
+	if (userIndices.length < turns) return 0;
+	return userIndices.at(-turns)!;
 }
 
-/** Select complete, unpurged pairs strictly older than the pinned user turns. */
+/** Oldest index of the newest messages whose estimated size fits `budget`, like Pi's keepRecentTokens walk. */
+function tokenStartIndex(messages: AgentMessage[], budget: number): number {
+	let accumulated = 0;
+	for (let index = messages.length - 1; index >= 0; index--) {
+		accumulated += estimateTokens(messages[index]!);
+		if (accumulated > budget) return index + 1;
+	}
+	return 0;
+}
+
+/** Oldest pinned index: whichever of the user-turn and token spans reaches further back. */
+export function pinnedStartIndex(messages: AgentMessage[], policy: PinPolicy): number {
+	return Math.min(userTurnStartIndex(messages, policy.userTurns), tokenStartIndex(messages, policy.recentTokens));
+}
+
+/** Select complete, unpurged pairs strictly older than the pinned span. */
 export function eligibleCandidates(
 	messages: AgentMessage[],
 	droppedIds: ReadonlySet<string>,
-	pinnedTurns = PINNED_USER_TURNS,
+	policy: PinPolicy,
 ): Candidate[] {
-	const pinnedStart = pinnedStartIndex(messages, pinnedTurns);
+	const pinnedStart = pinnedStartIndex(messages, policy);
 	return extractPairs(messages).filter(
 		(candidate) =>
 			candidate.assistantIndex < pinnedStart &&
@@ -135,7 +161,7 @@ export function eligibleCandidates(
 
 export function defaultGoal(messages: AgentMessage[]): string {
 	const prompts = messages.filter((message) => message.role === "user").map((message) => textFromContent(message.content));
-	const selected = [prompts[0], ...prompts.slice(-PINNED_USER_TURNS)].filter((prompt): prompt is string => Boolean(prompt));
+	const selected = [prompts[0], ...prompts.slice(-GOAL_RECENT_PROMPTS)].filter((prompt): prompt is string => Boolean(prompt));
 	return [...new Set(selected)].join("\n\n").slice(0, 4_000);
 }
 

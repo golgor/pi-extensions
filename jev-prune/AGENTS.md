@@ -14,7 +14,8 @@ from provider context without rewriting Pi session history.
 
 - **Deep module layout**:
   - `candidates.ts`: extraction of complete, unambiguous tool-call/result pairs,
-    turn pinning (default: 6 user turns), text extraction, and default goal/history builders.
+    recent-context pinning (last 2 user turns or Pi's `compaction.keepRecentTokens`,
+    whichever reaches further back), text extraction, and default goal/history builders.
   - `judge.ts`: bounded TypeSafe state fitting, `bool` question construction,
     deterministic batching, and the Pi classifier adapter.
   - `apply.ts`: reversible context rewriting, atomic pair removal, and
@@ -56,7 +57,7 @@ using `../test-utils/harness.ts` and exercise:
 
 - Dry run vs applied runs
 - Atomic pair removal and placeholder formatting
-- 6-turn pinning policy
+- Pinning policy (2 user turns; `keepRecentTokens` from settings, incl. per-model overrides)
 - Structural ambiguity handling (duplicate IDs, mismatched tool names, out-of-order execution)
 - Repeated apply idempotency and `/jev reset`
 - Status and history formatting

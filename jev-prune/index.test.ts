@@ -7,6 +7,15 @@ import fixture from "./fixtures/tool-session.json";
 const entries = fixture as unknown as SessionEntry[];
 const messages = buildSessionContext(entries).messages;
 
+/** Pi settings with token pinning off, so the small fixture's old pairs are eligible. */
+function settings(compaction: Record<string, unknown> = { keepRecentTokens: 0 }): Partial<ExtensionAPI> {
+	return { getSettings: () => ({ compaction }) } as Partial<ExtensionAPI>;
+}
+
+function mountJev(factory: Parameters<typeof mountExtension>[0], extras: Partial<ExtensionAPI> = {}) {
+	return mountExtension(factory, { ...settings(), ...extras });
+}
+
 type FakeAskRequest = { candidates: Array<{ toolCallId: string }> };
 
 function fakeAsker(probability: number, seen: string[] = []) {
@@ -20,7 +29,7 @@ function fakeAsker(probability: number, seen: string[] = []) {
 }
 
 function mountWithAsker(ask: ReturnType<typeof fakeAsker>) {
-	return mountExtension((pi) => jevPrune(pi, { ask }));
+	return mountJev((pi) => jevPrune(pi, { ask }));
 }
 
 function validPersistedState(activeDroppedIds = ["read-old"]) {
@@ -155,7 +164,7 @@ describe("jev-prune", () => {
 				usage: { inputTokens: 17, outputTokens: 2 },
 			};
 		};
-		const mounted = await mountExtension((pi) => jevPrune(pi, { ask: deferredAsker }));
+		const mounted = await mountJev((pi) => jevPrune(pi, { ask: deferredAsker }));
 		const notifications: Array<{ message: string; type: string | undefined }> = [];
 		const ctx = makeContext({ cwd: "/tmp/jev-prune", entries, contextTokens: 70_000, notifications });
 
@@ -182,7 +191,7 @@ describe("jev-prune", () => {
 				usage: { inputTokens: 1, outputTokens: 1 },
 			};
 		};
-		const mounted = await mountExtension((pi) => jevPrune(pi, { ask }));
+		const mounted = await mountJev((pi) => jevPrune(pi, { ask }));
 		const ctx = makeContext({ cwd: "/tmp/jev-prune", entries: dirty });
 
 		await mounted.commands.jev?.("dry", ctx);
@@ -202,6 +211,42 @@ describe("jev-prune", () => {
 			expect(seen).toEqual([]);
 			expect(await mounted.handlers.context?.({ type: "context", messages: ambiguousMessages }, ctx)).toBeUndefined();
 		}
+	});
+
+	test("pins only the last two user turns when token pinning is off", async () => {
+		// Tool pair after the third-newest user turn: pinned by the old 6-turn policy,
+		// eligible now that only the last two user turns are pinned.
+		const copy = structuredClone(entries) as SessionEntry[];
+		const a5 = copy.find((entry) => entry.id === "a5") as Extract<SessionEntry, { type: "message" }>;
+		(a5.message as { content: unknown[]; stopReason: string }).content = [{ type: "toolCall", id: "read-mid", name: "read", arguments: { path: "mid.config" } }];
+		const midResult = { type: "message", id: "r5", parentId: "a5", timestamp: "2026-01-01T00:00:10.500Z", message: { role: "toolResult", toolCallId: "read-mid", toolName: "read", content: [{ type: "text", text: "mid" }], isError: false, timestamp: 1767225610500 } } as SessionEntry;
+		copy.splice(copy.findIndex((entry) => entry.id === "u6"), 0, midResult);
+		(copy.find((entry) => entry.id === "u6") as SessionEntry).parentId = "r5";
+
+		const seen: string[] = [];
+		const mounted = await mountWithAsker(fakeAsker(0.9, seen));
+		await mounted.commands.jev?.("dry", makeContext({ cwd: "/tmp/jev-prune", entries: copy }));
+		expect(seen).toEqual(["read-old", "read-mid"]);
+	});
+
+	test("pins recent context within Pi's compaction keepRecentTokens", async () => {
+		const bigEntries = largeResultEntries();
+		const run = async (compaction: Record<string, unknown>) => {
+			const seen: string[] = [];
+			const notifications: Array<{ message: string; type: string | undefined }> = [];
+			const mounted = await mountJev((pi) => jevPrune(pi, { ask: fakeAsker(0.9, seen) }), settings(compaction));
+			await mounted.commands.jev?.("dry", makeContext({ cwd: "/tmp/jev-prune", entries: bigEntries, notifications }));
+			return { seen, notice: notifications.at(-1)?.message ?? "" };
+		};
+
+		// Pi's default (20k) covers the whole small session, large result included.
+		const byDefault = await run({});
+		expect(byDefault.seen).toEqual([]);
+		expect(byDefault.notice).toContain("recent 2 user turns and ~20k tokens pinned");
+		// A smaller budget leaves the large old result outside the pinned span.
+		expect((await run({ keepRecentTokens: 1_000 })).seen).toEqual(["read-old"]);
+		// A per-model override for the active model wins over the ordinary setting.
+		expect((await run({ keepRecentTokens: 1_000, modelOverrides: { "test/test": { keepRecentTokens: 50_000 } } })).seen).toEqual([]);
 	});
 
 	test("applied run removes selected pair atomically and preserves pinned user turns", async () => {
@@ -323,7 +368,7 @@ describe("jev-prune", () => {
 
 	test("persistence failure preserves existing active pruning state", async () => {
 		let failPersistence = false;
-		const mounted = await mountExtension(
+		const mounted = await mountJev(
 			(pi) => jevPrune(pi, { ask: fakeAsker(0.1) }),
 			{
 				appendEntry: () => {
@@ -494,7 +539,7 @@ describe("jev-prune", () => {
 				};
 			},
 		} as unknown as Parameters<typeof makeContext>[0]["modelRegistry"];
-		const mounted = await mountExtension(jevPrune);
+		const mounted = await mountJev(jevPrune);
 		const ctx = makeContext({ cwd: "/tmp/jev-prune", entries, modelRegistry });
 
 		await mounted.commands.jev?.("", ctx);
@@ -523,7 +568,7 @@ describe("jev-prune", () => {
 				findOfType: () => (found ? { type: "classifier", provider: "typesafe", id: "jev-latest" } : undefined),
 				classify: async () => ({ stopReason: "error", answers: {}, errorMessage }),
 			} as unknown as Parameters<typeof makeContext>[0]["modelRegistry"];
-			const mounted = await mountExtension(jevPrune);
+			const mounted = await mountJev(jevPrune);
 			const notifications: Array<{ message: string; type: string | undefined }> = [];
 			const ctx = makeContext({ cwd: "/tmp/jev-prune", entries, notifications, modelRegistry });
 
@@ -535,7 +580,7 @@ describe("jev-prune", () => {
 	});
 
 	test("asker failure leaves active state unchanged", async () => {
-		const mounted = await mountExtension((pi) =>
+		const mounted = await mountJev((pi) =>
 			jevPrune(pi, {
 				ask: async () => {
 					throw new Error("offline");
@@ -552,7 +597,7 @@ describe("jev-prune", () => {
 	});
 
 	test("explains TypeSafe context-limit failures without changing state", async () => {
-		const mounted = await mountExtension((pi) =>
+		const mounted = await mountJev((pi) =>
 			jevPrune(pi, {
 				ask: async () => {
 					throw new Error('400 {"detail":{"error_type":"max_tokens_exceeded"}}');
@@ -568,7 +613,7 @@ describe("jev-prune", () => {
 	});
 
 	test("malformed Jev answers preserve state and do not leak candidate payloads", async () => {
-		const mounted = await mountExtension((pi) => jevPrune(pi, { ask: async () => ({ probabilities: {}, usage: { inputTokens: 0, outputTokens: 0 } }) }));
+		const mounted = await mountJev((pi) => jevPrune(pi, { ask: async () => ({ probabilities: {}, usage: { inputTokens: 0, outputTokens: 0 } }) }));
 		const notifications: Array<{ message: string; type: string | undefined }> = [];
 		const ctx = makeContext({ cwd: "/tmp/jev-prune", entries, notifications });
 
@@ -697,7 +742,7 @@ describe("jev-prune", () => {
 	});
 
 	test("exposes subcommand argument completions with descriptions", async () => {
-		const ext = await mountExtension((pi) => jevPrune(pi, { ask: fakeAsker(0) }));
+		const ext = await mountJev((pi) => jevPrune(pi, { ask: fakeAsker(0) }));
 		const complete = ext.commandCompletions.jev;
 		expect(complete).toBeDefined();
 
