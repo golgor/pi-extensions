@@ -475,6 +475,65 @@ describe("jev-prune", () => {
 		}
 	});
 
+	test("judges through Pi's typesafe/jev-latest classifier by default", async () => {
+		const lookups: unknown[][] = [];
+		const requests: Array<{ state: Record<string, unknown>; questions: Record<string, { type: string; instructions: string }> }> = [];
+		const jevModel = { type: "classifier", provider: "typesafe", id: "jev-latest" };
+		const modelRegistry = {
+			findOfType: (...args: unknown[]) => {
+				lookups.push(args);
+				return jevModel;
+			},
+			classify: async (model: unknown, context: (typeof requests)[number]) => {
+				expect(model).toBe(jevModel);
+				requests.push(context);
+				return {
+					stopReason: "stop",
+					answers: Object.fromEntries(Object.keys(context.questions).map((id) => [id, { type: "bool", probability: 0.1 }])),
+					usage: { input: 17, output: 2 },
+				};
+			},
+		} as unknown as Parameters<typeof makeContext>[0]["modelRegistry"];
+		const mounted = await mountExtension(jevPrune);
+		const ctx = makeContext({ cwd: "/tmp/jev-prune", entries, modelRegistry });
+
+		await mounted.commands.jev?.("", ctx);
+		expect(lookups).toEqual([["classifier", "typesafe", "jev-latest"]]);
+		expect(Object.keys(requests[0]!.questions)).toEqual(["read-old"]);
+		expect(requests[0]!.questions["read-old"]!.type).toBe("bool");
+		expect(requests[0]!.questions["read-old"]!.instructions).toContain("calls.read-old");
+		expect(requests[0]!.state).toHaveProperty("calls.read-old.tool", "read");
+		expect(mounted.appendedEntries[0]?.data).toMatchObject({
+			mode: "applied",
+			activeDroppedIds: ["read-old"],
+			run: { usage: { inputTokens: 17, outputTokens: 2 }, requestCount: 1 },
+		});
+	});
+
+	test("maps Pi classifier failures to actionable notices without changing state", async () => {
+		const cases: Array<{ found: boolean; errorMessage?: string; expected: string }> = [
+			{ found: false, expected: "Pi has no typesafe/jev-latest classifier" },
+			{ found: true, errorMessage: "Provider is not configured: typesafe", expected: "no TypeSafe credentials" },
+			{ found: true, errorMessage: 'System One API error (401): {"detail":{"error_type":"authentication_error"}}', expected: "TypeSafe authentication failed" },
+			{ found: true, errorMessage: "System One API error (429): slow down", expected: "TypeSafe rate limit reached" },
+			{ found: true, errorMessage: 'System One API error (400): {"detail":{"error_type":"max_tokens_exceeded"}}', expected: "TypeSafe request exceeds its context limit" },
+		];
+		for (const { found, errorMessage, expected } of cases) {
+			const modelRegistry = {
+				findOfType: () => (found ? { type: "classifier", provider: "typesafe", id: "jev-latest" } : undefined),
+				classify: async () => ({ stopReason: "error", answers: {}, errorMessage }),
+			} as unknown as Parameters<typeof makeContext>[0]["modelRegistry"];
+			const mounted = await mountExtension(jevPrune);
+			const notifications: Array<{ message: string; type: string | undefined }> = [];
+			const ctx = makeContext({ cwd: "/tmp/jev-prune", entries, notifications, modelRegistry });
+
+			await mounted.commands.jev?.("", ctx);
+			expect(mounted.appendedEntries).toHaveLength(0);
+			expect(notifications.at(-1)?.message).toContain(expected);
+			expect(notifications.at(-1)?.type).toBe("error");
+		}
+	});
+
 	test("asker failure leaves active state unchanged", async () => {
 		const mounted = await mountExtension((pi) =>
 			jevPrune(pi, {

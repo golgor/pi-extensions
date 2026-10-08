@@ -122,6 +122,8 @@ export interface FakeContextOptions {
 	notifications?: Array<{ message: string; type: string | undefined }>;
 	/** Mock handler for ctx.ui.custom components. */
 	onCustomUI?: (factory: Function, options?: any) => any;
+	/** Fake `ctx.modelRegistry` members (e.g. `findOfType`, `classify`) an extension calls. */
+	modelRegistry?: Partial<ExtensionContext["modelRegistry"]>;
 }
 
 /** Builds a minimal fake `ExtensionContext` with branch-backed session reads. */
@@ -136,6 +138,7 @@ export function makeContext(options: FakeContextOptions): ExtensionContext {
 		statuses = new Map(),
 		notifications = [],
 		onCustomUI,
+		modelRegistry = {},
 	} = options;
 
 	const theme = {
@@ -153,6 +156,7 @@ export function makeContext(options: FakeContextOptions): ExtensionContext {
 		mode: "tui",
 		model: { contextWindow },
 		getContextUsage: () => ({ tokens: contextTokens, contextWindow, percent: null }),
+		modelRegistry,
 		sessionManager: {
 			getEntries: () => entries,
 			getBranch: () => entries,

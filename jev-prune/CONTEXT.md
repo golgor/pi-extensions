@@ -138,7 +138,7 @@ Build bounded TypeSafe state
 One independent Noul question per candidate
         │
         ▼
-TypeSafe SDK → Jev (`jev-latest`)
+Pi classifier API → TypeSafe Jev (`typesafe/jev-latest`)
         │
         ├─ p(keep) >= 0.5 ──► keep
         └─ p(keep) <  0.5 ──► drop pair
@@ -236,16 +236,22 @@ one narrow question for each independently actionable candidate:
 > Given `goal` and `history`, does the tool-call/result pair in `calls.<id>`
 > still need to remain visible for continuing the task correctly?
 
-The answer is a Noul probability `p(yes)`, interpreted as `p(keep)`. There is
-no separate confidence value for Noul. The initial threshold is `0.5`; it is a
+The answer is a `bool` probability `p(true)` (TypeSafe's wire-level Noul),
+interpreted as `p(keep)`. There is no separate confidence value. The initial threshold is `0.5`; it is a
 policy constant to evaluate against real sessions, not a universal truth.
 
-### SDK and request shape
+### Classifier API and request shape
 
-Use the official `@typesafe-ai/sdk` as a root runtime dependency of this
-monorepo. Do not add an extension-local `package.json`. The SDK owns HTTP
-transport, typed response parsing, and retry/backoff behavior. Authentication
-comes from `TYPESAFE_API_KEY`, already supplied by fnox.
+Call Jev through Pi's classifier API, `ctx.modelRegistry.classify()` (Pi
+≥ 0.99; this extension targets 1.1.0), with the built-in
+`typesafe/jev-latest` model found via `ctx.modelRegistry.findOfType()`. Pi
+owns HTTP transport, answer parsing (`bool` questions map to TypeSafe's
+`noul`), retries, and credential resolution from `TYPESAFE_API_KEY` (already
+supplied by fnox) or Pi's `auth.json`. `classify()` never rejects: a result
+with `stopReason` other than `"stop"` carries an `errorMessage`, which Jev
+turns into a failed run. The model is fixed to the direct TypeSafe provider;
+Pi also lists Jev on OpenRouter, OpenCode, Cloudflare, and Vercel, but using
+them would change the trust boundary below and is not supported.
 
 Conceptual state:
 
@@ -297,7 +303,6 @@ implementation or later budget changes:
 - https://docs.typesafe.ai/api.md
 - https://docs.typesafe.ai/primitives/noul.md
 - https://docs.typesafe.ai/concepts/state.md
-- https://docs.typesafe.ai/sdk/javascript.md
 - https://docs.typesafe.ai/confidence.md
 - https://docs.typesafe.ai/models.md
 
@@ -577,7 +582,7 @@ V1 safeguards are deliberately structural rather than heuristic:
 - no images or binary payloads;
 - result content limited to a 200-character prefix;
 - no request-payload logging;
-- API key read by the SDK from `TYPESAFE_API_KEY` and never persisted.
+- API key resolved by Pi (`TYPESAFE_API_KEY` or `auth.json`) and never read or persisted by the extension.
 
 Before invoking `/jev`, active context must be suitable for disclosure to
 TypeSafe. This is a trust decision, not a promise that regexes can sanitize
@@ -620,7 +625,7 @@ There is one real internal seam: an asker interface with two adapters.
 
 ```text
 Relevance asker
-├── TypeSafe SDK adapter (runtime)
+├── Pi classifier adapter (runtime, `ctx.modelRegistry.classify`)
 └── deterministic fake adapter (tests)
 ```
 
@@ -677,7 +682,7 @@ needs.
 Rejected. `tamaratran/fast-jev-compaction` is a valuable behavioral reference,
 but its Claude Code adapter, three-way decision (`keep`, `drop_result`,
 `drop_call`), and pre-SDK transport do not match this design. Rewrite around
-Pi's seams and the official TypeSafe SDK while retaining learned constraints:
+Pi's seams and Pi's classifier API while retaining learned constraints:
 pair integrity, bounded state, batching, and fail-safe application.
 
 Reference: https://github.com/tamaratran/fast-jev-compaction
@@ -691,11 +696,13 @@ no generated summary.
 
 Reference: https://github.com/alpertarhan/pi-smart-compact
 
-### Raw HTTP instead of the TypeSafe SDK
+### Raw HTTP or the TypeSafe SDK instead of Pi's classifier API
 
-Rejected. The official SDK provides typed answers and retry/backoff behavior.
-A hand-written client would create request parsing and transport policy that
-the extension should not own.
+Rejected. A hand-written client would create request parsing and transport
+policy that the extension should not own. `@typesafe-ai/sdk` was used before
+Pi 0.99 added classifiers; it was this repo's only runtime dependency and
+read credentials separately from Pi. Pi's API gives typed answers, retries,
+Pi-managed credentials, and token usage without a dependency.
 
 ### Full tool results in TypeSafe state
 
