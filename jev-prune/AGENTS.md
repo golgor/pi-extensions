@@ -18,10 +18,12 @@ from provider context without rewriting Pi session history.
   - `apply.ts`: reversible context rewriting, atomic pair removal, and
     assistant text placeholder insertion.
   - `accounting.ts`: single home for all token/size/cost estimation and
-    formatting (`estimateMessageTokens`, `effectiveTokens`, `formatTokens`,
+    formatting (`estimateMessageTokens`, `projectTokens`, `formatTokens`,
     `formatBytes`, `estimateCost`). Status, run bookkeeping, and the
     compaction guard all route "effective tokens after prune" through
-    `effectiveTokens`, so there is exactly one accounting strategy.
+    `projectTokens`, so there is exactly one accounting strategy. Pi's
+    baseline (observed usage, `tokensBefore`) was measured under the prune
+    set active at the last provider response; never treat it as raw.
   - `record.ts`: persisted run-record schema (`PersistedState`/`PersistedRun`/
     `PersistedCandidate`), its validators, bound constants, and text formatters
     (`formatRun`/`formatCandidates`), read by both `index.ts` and `viewer.ts`.

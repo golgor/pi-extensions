@@ -1,10 +1,12 @@
 import {
+	calculateContextTokens,
 	shouldCompact,
 	type ExtensionAPI,
 	type ExtensionCommandContext,
 	type ExtensionContext,
+	type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
-import { effectiveTokens, estimateMessageTokens, formatTokens } from "./accounting";
+import { formatTokens, projectTokens, type TokenProjection } from "./accounting";
 import { applyPrunes } from "./apply";
 import { defaultGoal, eligibleCandidates, extractPairs, historyForJudgment } from "./candidates";
 import { createTypeSafeAsker, judgeCandidates, type RelevanceAsker } from "./judge";
@@ -37,19 +39,49 @@ function runId(): string {
 	return `jev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-function rawTokenEstimate(ctx: ExtensionContext, messages: ReturnType<typeof messagesForContext>): number {
-	return ctx.getContextUsage()?.tokens ?? estimateMessageTokens(messages);
+type Messages = ReturnType<typeof messagesForContext>;
+
+function persistedDroppedIds(entry: SessionEntry): Set<string> | undefined {
+	if (entry.type !== "custom" || entry.customType !== CUSTOM_TYPE || !isPersistedState(entry.data)) return undefined;
+	return new Set(entry.data.activeDroppedIds);
 }
 
-/** Status projection uses proportional scaling against observed usage. */
-function statusEffectiveTokenEstimate(ctx: ExtensionContext, messages: ReturnType<typeof messagesForContext>, filtered: ReturnType<typeof messagesForContext>): number {
-	return effectiveTokens(messages, filtered, ctx.getContextUsage()?.tokens);
+/** Mirrors Pi's rule for which assistant usage it trusts as a context measurement. */
+function hasMeasuredUsage(entry: SessionEntry): boolean {
+	if (entry.type !== "message" || entry.message.role !== "assistant") return false;
+	const { stopReason, usage } = entry.message;
+	return stopReason !== "aborted" && stopReason !== "error" && Boolean(usage) && calculateContextTokens(usage) > 0;
 }
 
-function statusText(ctx: ExtensionContext, messages: ReturnType<typeof messagesForContext>, activeDroppedIds: ReadonlySet<string>): string | undefined {
-	const filtered = applyPrunes(messages, activeDroppedIds);
-	if (!filtered) return undefined;
-	return `Jev ${formatTokens(statusEffectiveTokenEstimate(ctx, messages, filtered))} / raw ${formatTokens(rawTokenEstimate(ctx, messages))} · ${activeDroppedIds.size} purged`;
+/**
+ * Dropped IDs that shaped Pi's current token baseline. Pi measures context from
+ * the last valid assistant usage - a request Jev had already filtered with the
+ * IDs active then. A later compaction or context_edit invalidates that usage and
+ * Pi falls back to estimating the unfiltered projection.
+ */
+function droppedIdsAtBaseline(ctx: ExtensionContext): ReadonlySet<string> {
+	let active: ReadonlySet<string> = new Set();
+	let atBaseline: ReadonlySet<string> = new Set();
+	for (const entry of ctx.sessionManager.getBranch()) {
+		const persisted = persistedDroppedIds(entry);
+		if (persisted) active = persisted;
+		else if (entry.type === "compaction" || entry.type === "context_edit") atBaseline = new Set();
+		else if (hasMeasuredUsage(entry)) atBaseline = active;
+	}
+	return atBaseline;
+}
+
+/** Raw and effective (with `droppedIds`) token estimates against a Pi baseline. */
+function tokenProjection(ctx: ExtensionContext, messages: Messages, droppedIds: ReadonlySet<string>, baselineTokens = ctx.getContextUsage()?.tokens): TokenProjection {
+	const measured = applyPrunes(messages, droppedIdsAtBaseline(ctx)) ?? messages;
+	const effective = applyPrunes(messages, droppedIds) ?? messages;
+	return projectTokens(messages, measured, effective, baselineTokens);
+}
+
+function statusText(ctx: ExtensionContext, messages: Messages, activeDroppedIds: ReadonlySet<string>): string | undefined {
+	if (!applyPrunes(messages, activeDroppedIds)) return undefined;
+	const tokens = tokenProjection(ctx, messages, activeDroppedIds);
+	return `Jev ${formatTokens(tokens.effective)} / raw ${formatTokens(tokens.raw)} · ${activeDroppedIds.size} purged`;
 }
 
 /**
@@ -68,7 +100,7 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 		runs = [];
 		for (const entry of ctx.sessionManager.getBranch()) {
 			if (entry.type !== "custom" || entry.customType !== CUSTOM_TYPE || !isPersistedState(entry.data)) continue;
-			activeDroppedIds = new Set(entry.data.activeDroppedIds.filter((id): id is string => typeof id === "string"));
+			activeDroppedIds = new Set(entry.data.activeDroppedIds);
 			runs.push(entry.data.run);
 		}
 		updateStatus(ctx);
@@ -97,7 +129,6 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 		const messages = messagesForContext(ctx);
 		const candidates = eligibleCandidates(messages, activeDroppedIds);
 		const goal = (focus || defaultGoal(messages)).slice(0, GOAL_LIMIT);
-		const rawTokens = rawTokenEstimate(ctx, messages);
 
 		try {
 			const judged = await judgeCandidates(goal, historyForJudgment(messages), candidates, ask);
@@ -117,7 +148,7 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 			});
 			const newlyDroppedIds = judged.judgments.filter((judgment) => judgment.outcome === "drop").map((judgment) => judgment.toolCallId);
 			const projectedDroppedIds = new Set([...activeDroppedIds, ...newlyDroppedIds]);
-			const effectiveMessages = applyPrunes(messages, projectedDroppedIds) ?? messages;
+			const tokens = tokenProjection(ctx, messages, projectedDroppedIds);
 			const nextDroppedIds = mode === "applied" ? projectedDroppedIds : activeDroppedIds;
 			const run: PersistedRun = {
 				id: runId(),
@@ -125,8 +156,8 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 				mode,
 				goal,
 				candidates: diagnostics,
-				rawTokens,
-				effectiveTokens: statusEffectiveTokenEstimate(ctx, messages, effectiveMessages),
+				rawTokens: tokens.raw,
+				effectiveTokens: tokens.effective,
 				usage: judged.usage,
 				requestCount: judged.requestCount,
 			};
@@ -185,13 +216,12 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 		try {
 			const tokensBefore = event.preparation.tokensBefore;
 			// A non-positive baseline is a degenerate preparation value: fail open so
-			// effectiveTokens never falls back to the small filtered estimate and
+			// the projection never falls back to the small filtered estimate and
 			// wrongly cancels native compaction.
 			if (!isFiniteNonNegative(tokensBefore) || tokensBefore <= 0) return;
 			const messages = messagesForContext(ctx);
-			const filtered = applyPrunes(messages, activeDroppedIds);
-			if (!filtered) return;
-			const projectedTokens = effectiveTokens(messages, filtered, tokensBefore);
+			if (!applyPrunes(messages, activeDroppedIds)) return;
+			const projectedTokens = tokenProjection(ctx, messages, activeDroppedIds, tokensBefore).effective;
 			if (!shouldCompact(projectedTokens, ctx.model.contextWindow, event.preparation.settings)) {
 				return { cancel: true };
 			}
@@ -267,13 +297,14 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 				const availableIds = new Set(extractPairs(messages).map((candidate) => candidate.toolCallId));
 				const restored = [...activeDroppedIds].filter((id) => availableIds.has(id)).length;
 				const unavailable = activeDroppedIds.size - restored;
+				const rawTokens = tokenProjection(ctx, messages, new Set()).raw;
 				const run: PersistedRun = {
 					id: runId(),
 					at: new Date().toISOString(),
 					mode: "reset",
 					candidates: [],
-					rawTokens: rawTokenEstimate(ctx, messages),
-					effectiveTokens: rawTokenEstimate(ctx, messages),
+					rawTokens,
+					effectiveTokens: rawTokens,
 					usage: { inputTokens: 0, outputTokens: 0 },
 					requestCount: 0,
 				};
