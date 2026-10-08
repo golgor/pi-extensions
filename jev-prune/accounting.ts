@@ -6,26 +6,34 @@ export function estimateMessageTokens(messages: AgentMessage[]): number {
 	return messages.reduce((total, message) => total + estimateTokens(message), 0);
 }
 
+export interface TokenProjection {
+	raw: number;
+	effective: number;
+}
+
 /**
- * Estimate effective tokens using proportional character reduction against
- * an authoritative baseline (observed usage or a compaction's tokensBefore).
- * This is the single strategy for "effective tokens after prune" - status,
+ * Project an authoritative baseline (Pi's observed usage or a compaction's
+ * tokensBefore) onto the raw and effective contexts. The baseline was measured
+ * on `measured` - the context as the provider saw it, which may already be
+ * pruned - so each projection scales it by its structural size relative to
+ * `measured`. This is the single strategy for raw/effective tokens: status,
  * run bookkeeping, and the compaction guard all route through it.
  */
-export function effectiveTokens(
-	messages: AgentMessage[],
-	filtered: AgentMessage[],
+export function projectTokens(
+	raw: AgentMessage[],
+	measured: AgentMessage[],
+	effective: AgentMessage[],
 	baselineTokens?: number | null,
-): number {
-	const rawTokens = estimateMessageTokens(messages);
-	const filteredTokens = estimateMessageTokens(filtered);
-	if (!Number.isFinite(rawTokens) || rawTokens <= 0) return filteredTokens;
-
-	const remainingRatio = Math.max(0, Math.min(1, filteredTokens / rawTokens));
-	if (baselineTokens !== null && baselineTokens !== undefined && Number.isFinite(baselineTokens) && baselineTokens > 0) {
-		return Math.round(baselineTokens * remainingRatio);
+): TokenProjection {
+	const rawTokens = estimateMessageTokens(raw);
+	const measuredTokens = estimateMessageTokens(measured);
+	const effectiveTokens = estimateMessageTokens(effective);
+	const validBaseline = typeof baselineTokens === "number" && Number.isFinite(baselineTokens) && baselineTokens > 0;
+	if (!validBaseline || !Number.isFinite(measuredTokens) || measuredTokens <= 0) {
+		return { raw: rawTokens, effective: effectiveTokens };
 	}
-	return filteredTokens;
+	const scale = baselineTokens / measuredTokens;
+	return { raw: Math.round(rawTokens * scale), effective: Math.round(effectiveTokens * scale) };
 }
 
 export function formatTokens(tokens: number): string {

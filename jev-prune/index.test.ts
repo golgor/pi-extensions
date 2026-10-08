@@ -58,6 +58,41 @@ function largeResultEntries(): SessionEntry[] {
 	return copy;
 }
 
+/**
+ * Large-result session where an applied Jev state is followed by a provider
+ * response. Pi's context usage and `tokensBefore` then come from that response,
+ * which already saw the pruned request.
+ */
+function prunedThenRespondedEntries(): SessionEntry[] {
+	return [
+		...largeResultEntries(),
+		{
+			type: "custom",
+			id: "jev-state",
+			parentId: "u7",
+			timestamp: "2026-01-01T00:00:14.000Z",
+			customType: "jev-prune",
+			data: validPersistedState(),
+		},
+		{
+			type: "message",
+			id: "a8",
+			parentId: "jev-state",
+			timestamp: "2026-01-01T00:00:15.000Z",
+			message: {
+				role: "assistant",
+				content: [{ type: "text", text: "Done." }],
+				api: "test",
+				provider: "test",
+				model: "test",
+				usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+				stopReason: "stop",
+				timestamp: 1767225615000,
+			},
+		} as SessionEntry,
+	];
+}
+
 function contextEditedEntries(): SessionEntry[] {
 	return [
 		...entries,
@@ -360,6 +395,62 @@ describe("jev-prune", () => {
 			ctx,
 		);
 		expect(result).toEqual({ cancel: true });
+	});
+
+	test("threshold guard does not discount a baseline that already reflects the active prunes", async () => {
+		const prunedEntries = prunedThenRespondedEntries();
+		const mounted = await mountWithAsker(fakeAsker(0.1));
+		const ctx = makeContext({ cwd: "/tmp/jev-prune", entries: prunedEntries, contextWindow: 128_000 });
+		await mounted.handlers.session_start?.({ type: "session_start", reason: "resume" }, ctx);
+
+		// a8 responded after read-old was pruned, so Pi's 130k baseline is already the
+		// effective size. It exceeds the 111_616 threshold: native compaction must run.
+		const result = await mounted.handlers.session_before_compact?.(
+			{
+				type: "session_before_compact",
+				reason: "threshold",
+				branchEntries: prunedEntries,
+				preparation: { tokensBefore: 130_000, settings: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 20_000 } },
+			},
+			ctx,
+		);
+		expect(result).toBeUndefined();
+	});
+
+	test("threshold guard scales again once a context edit invalidates the post-prune usage", async () => {
+		// Pi ignores usage recorded before a later context_edit/compaction and falls
+		// back to an unfiltered estimate, so the baseline is raw again.
+		const editedEntries: SessionEntry[] = [
+			...prunedThenRespondedEntries(),
+			{ type: "context_edit", id: "edit-1", parentId: "a8", timestamp: "2026-01-01T00:00:16.000Z", targetId: "a2", replacement: null },
+		];
+		const mounted = await mountWithAsker(fakeAsker(0.1));
+		const ctx = makeContext({ cwd: "/tmp/jev-prune", entries: editedEntries, contextWindow: 128_000 });
+		await mounted.handlers.session_start?.({ type: "session_start", reason: "resume" }, ctx);
+
+		const result = await mounted.handlers.session_before_compact?.(
+			{
+				type: "session_before_compact",
+				reason: "threshold",
+				branchEntries: editedEntries,
+				preparation: { tokensBefore: 130_000, settings: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 20_000 } },
+			},
+			ctx,
+		);
+		expect(result).toEqual({ cancel: true });
+	});
+
+	test("footer treats observed usage after a pruned response as the effective size", async () => {
+		const statuses = new Map<string, string | undefined>();
+		const ctx = makeContext({ cwd: "/tmp/jev-prune", entries: prunedThenRespondedEntries(), contextTokens: 70_000, statuses });
+		const mounted = await mountWithAsker(fakeAsker(0.1));
+		await mounted.handlers.session_start?.({ type: "session_start", reason: "resume" }, ctx);
+
+		const status = statuses.get("jev-prune") ?? "";
+		const match = status.match(/^Jev (\d+)k \/ raw (\d+)k · 1 purged$/);
+		expect(match).not.toBeNull();
+		expect(Number(match![1])).toBe(70);
+		expect(Number(match![2])).toBeGreaterThan(70);
 	});
 
 	test("fails open when threshold accounting baseline is invalid", async () => {

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { buildSessionContext, type SessionEntry } from "@earendil-works/pi-coding-agent";
 import * as apply from "./apply";
-import { effectiveTokens, estimateCost, estimateMessageTokens, formatBytes, formatTokens } from "./accounting";
+import { estimateCost, estimateMessageTokens, formatBytes, formatTokens, projectTokens } from "./accounting";
 import { applyPrunes } from "./apply";
 import * as viewer from "./viewer";
 import fixture from "./fixtures/tool-session.json";
@@ -10,18 +10,26 @@ const entries = fixture as unknown as SessionEntry[];
 const messages = buildSessionContext(entries).messages;
 
 describe("accounting", () => {
-	test("effectiveTokens scales an authoritative baseline by the structural reduction ratio", () => {
+	test("projectTokens scales a raw-measured baseline by the structural reduction ratio", () => {
 		const filtered = applyPrunes(messages, new Set(["read-old"])) ?? messages;
-		const raw = estimateMessageTokens(messages);
-		const filteredTokens = estimateMessageTokens(filtered);
-		const ratio = Math.max(0, Math.min(1, filteredTokens / raw));
+		const ratio = estimateMessageTokens(filtered) / estimateMessageTokens(messages);
 		const baseline = 130_000;
-		expect(effectiveTokens(messages, filtered, baseline)).toBe(Math.round(baseline * ratio));
+		expect(projectTokens(messages, messages, filtered, baseline)).toEqual({ raw: baseline, effective: Math.round(baseline * ratio) });
 	});
 
-	test("effectiveTokens falls back to the filtered structural estimate without a baseline", () => {
+	test("projectTokens treats a baseline measured on the pruned context as effective", () => {
 		const filtered = applyPrunes(messages, new Set(["read-old"])) ?? messages;
-		expect(effectiveTokens(messages, filtered)).toBe(estimateMessageTokens(filtered));
+		const ratio = estimateMessageTokens(messages) / estimateMessageTokens(filtered);
+		const baseline = 50_000;
+		expect(projectTokens(messages, filtered, filtered, baseline)).toEqual({ raw: Math.round(baseline * ratio), effective: baseline });
+	});
+
+	test("projectTokens falls back to structural estimates without a baseline", () => {
+		const filtered = applyPrunes(messages, new Set(["read-old"])) ?? messages;
+		expect(projectTokens(messages, messages, filtered)).toEqual({
+			raw: estimateMessageTokens(messages),
+			effective: estimateMessageTokens(filtered),
+		});
 	});
 
 	test("formatTokens/formatBytes/estimateCost format as expected", () => {

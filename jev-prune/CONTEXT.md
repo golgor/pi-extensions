@@ -338,26 +338,21 @@ historical evaluation. Expected metadata volume is small.
 
 ## Native compaction interaction
 
-### The ordering problem
+### What Pi measures
 
-Pi checks its automatic compaction threshold before extension `context`
-transformations:
+Pi decides on automatic compaction from the provider-reported usage of the
+last valid assistant response plus estimates for later messages. That
+response's request already went through the `context` handlers, so its usage
+reflects the Jev prune set active at that time:
 
 ```text
-raw session messages
-        │
-        ▼
-Pi estimates raw tokens ──► maybe starts native compaction
-        │
-        ▼
-`context` handlers run
-        │
-        ▼
-provider sees Jev-filtered messages
+/jev applied ──► next request filtered ──► provider usage = pruned size
 ```
 
-Therefore context pruning alone reduces provider input but does not reliably
-postpone native compaction.
+Pi's baseline is therefore stale only between an apply (or reset) and the next
+response, or when a later compaction or `context_edit` makes Pi ignore that
+usage and estimate the unfiltered projection instead. During that window lossy
+native compaction can trigger on raw size.
 
 ### Threshold-only shadow accounting
 
@@ -372,12 +367,15 @@ Pi requests threshold compaction
 Rebuild active context
         │
         ▼
-Apply active Jev dropped IDs
+Find the prune set Pi's baseline was measured under: the Jev state
+active at the last valid assistant usage, or none if a later
+compaction/context_edit invalidated that usage
         │
         ▼
-Scale Pi's `preparation.tokensBefore` baseline by the filtered/raw
-structural token ratio (`accounting.ts`'s `effectiveTokens` - the same
-proportional estimator status and run bookkeeping use)
+Scale `preparation.tokensBefore` by the structural size of the
+context under the active set relative to the measured set
+(`accounting.ts`'s `projectTokens` - the same estimator status and
+run bookkeeping use)
         │
         ▼
 Use projected context + active model window + compaction settings
@@ -398,7 +396,11 @@ Safety rules:
 - This guard does not contact Jev. It only honors already-applied manual
   decisions.
 
-Potential upstream improvement: Pi could calculate automatic-compaction
+When the baseline was measured under the active set, the ratio is 1 and the
+guard defers to Pi. Scaling an already-pruned baseline again would undercount
+and cancel compactions the context still needs.
+
+Potential upstream improvement: Pi could recalculate automatic-compaction
 pressure after context transformations. Until then, shadow accounting is the
 smallest extension-local solution.
 
@@ -450,11 +452,11 @@ While any dropped IDs affect active context, show an extension-owned status:
 Jev 31k / raw 70k · 17 purged
 ```
 
-- `raw` uses Pi's observed context usage when available, otherwise Pi's
-  exported per-message estimator.
-- `Jev` scales the observed raw usage by the filtered/raw structural ratio
-  (`accounting.effectiveTokens`); the status footer and the compaction guard
-  use that one estimator.
+- Both scale Pi's observed context usage, which was measured under the prune
+  set active at the last provider response, by each context's structural
+  size relative to that measured context (`accounting.projectTokens`). Without
+  observed usage they fall back to Pi's per-message estimator. The status
+  footer, run records, and the compaction guard use that one estimator.
 - Both remain estimates when provider usage is unavailable or stale.
 - Update after apply/reset, session or branch changes, and context changes.
 - Clear the footer when no active pair is being pruned.
@@ -644,9 +646,9 @@ message/tool structure and becomes irreversible in active context.
 
 ### Context filtering without native-threshold handling
 
-Rejected. It reduces provider input but Pi checks compaction pressure before
-`context` handlers, so lossy native compaction can still trigger based on raw
-messages.
+Rejected. It reduces provider input, but until the next provider response
+Pi's compaction baseline is still the unfiltered size, so lossy native
+compaction can trigger based on raw messages right after an apply.
 
 ### Remove only tool results
 
