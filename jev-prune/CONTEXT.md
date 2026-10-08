@@ -683,6 +683,34 @@ Rejected for v1. Session mutation violates Pi's ownership and append-only
 model. Forking introduces navigation and persistence complexity when the
 `context` hook already provides reversible transformation.
 
+### Prune in `context_with_system` instead of `context`
+
+Rejected. Since Pi 0.87, `context` handlers receive messages without system
+messages and Pi restores the system prompt and tool declarations afterward.
+`context_with_system` runs on the full transcript and sends the result as
+returned, so pruning there would make Jev own preserving the system prompt
+and tool declarations. Jev only drops tool-call/result pairs; the narrower
+hook is enough and safer.
+
+### Prune with Pi's native `context_edit` entries
+
+Deferred to a possible v2, not a drop-in change.
+`SessionManager.appendContextEdit(targetId, null)` would make omissions
+durable, and Pi's projection, compaction accounting, and other extensions
+would all see the pruned context (removing the need for Jev's own token
+projection). Costs:
+
+- edits target session entry IDs, while Jev keys decisions by `toolCallId`;
+  one assistant entry can hold text plus several tool calls, so Jev would
+  have to write replacement content that removes only the selected blocks;
+- edits are append-only, so `/jev reset` would need to append restoring
+  replacements, and run records do not keep the full original content;
+- disabling the extension would no longer restore the context;
+- branch behavior and edit ordering need explicit tests.
+
+The `jev-prune` custom entries would stay either way for run records and
+branch-local state.
+
 ### Ask Pi's current model or a subagent
 
 Rejected. It adds latency, model-dependent free-form parsing, and unnecessary
