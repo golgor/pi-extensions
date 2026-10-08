@@ -121,7 +121,7 @@ original messages again, unless Pi has since natively compacted that span.
 Build active, compaction-aware Pi context
         │
         ├─ Pair tool calls and results by toolCallId
-        ├─ Pin current + previous user turns
+        ├─ Pin last 2 user turns + Pi's keepRecentTokens
         ├─ Exclude incomplete pairs
         └─ Exclude already-dropped pairs
         │
@@ -200,10 +200,22 @@ A candidate is one complete tool-call/result pair identified by
 - Failed and successful pairs are both eligible. Jev receives an `is_error`
   fact, and a dropped failure remains visibly marked as failed in its
   placeholder.
-- Recent user turns are pinned (default: 6 turns). More precisely: scan user
-  messages backward; every message from the sixth-newest user message onward
-  is ineligible. If fewer than six user turns exist, all available work is
-  pinned.
+- Recent context is pinned by whichever of two spans reaches further back:
+  - **User turns:** every message from the second-newest user message onward
+    (current and previous turn). If fewer than two user turns exist, all work
+    is pinned.
+  - **Tokens:** the newest messages whose estimated size fits Pi's
+    `compaction.keepRecentTokens` (default 20k), resolved like Pi does: the
+    active model's `compaction.modelOverrides["provider/id"]`, then the
+    ordinary setting, then Pi's default. It is read via `pi.getSettings()` on
+    each run, so changing the setting changes Jev too.
+
+  Why both: counting user turns alone ignores size. Agent-heavy sessions do
+  most of their tool work inside a few prompts, so a 6-turn pin protected
+  200k+ tokens and left nothing to judge. The token span reuses Pi's own
+  "keep verbatim" budget, so Jev never prunes what native compaction would
+  keep, and one setting governs both. The 2-turn span keeps work in progress
+  safe even when a single huge result fills the token budget.
 - Incomplete or structurally ambiguous pairs are retained rather than guessed
   about.
 - Previously dropped IDs are excluded from later Jev requests. This makes
@@ -596,7 +608,7 @@ small interfaces, high locality, and tests crossing the same seams callers do.
 ```text
 jev-prune/
 ├── index.ts        Pi factory, commands, persistence I/O, lifecycle, UI
-├── candidates.ts   Pair extraction, turn pinning, eligibility
+├── candidates.ts   Pair extraction, recent-context pinning, eligibility
 ├── judge.ts        State fitting, Noul questions, batching, decisions
 ├── apply.ts        Pair removal and placeholder insertion
 ├── accounting.ts   Token/size/cost estimation and formatting (one strategy)
@@ -724,10 +736,10 @@ trust before pruning occurs without an explicit user action.
 ## Acceptance criteria for implementation
 
 1. `/jev dry` changes no provider context or active dropped IDs.
-2. `/jev` judges only complete, unpurged pairs older than pinned user turns (default: 6).
+2. `/jev` judges only complete, unpurged pairs older than the pinned span (last 2 user turns or Pi's `keepRecentTokens`, whichever reaches further back).
 3. Selected call and result disappear together; one placeholder remains in
    the call's position.
-4. Pinned recent user turns remain byte-for-byte unchanged.
+4. The pinned span remains byte-for-byte unchanged.
 5. Repeating `/jev` excludes already-dropped IDs.
 6. Restart and branch navigation reconstruct correct branch-local state.
 7. `/jev reset` restores all pairs still available in active context and

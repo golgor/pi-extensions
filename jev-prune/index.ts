@@ -1,5 +1,6 @@
 import {
 	calculateContextTokens,
+	DEFAULT_COMPACTION_SETTINGS,
 	shouldCompact,
 	type ExtensionAPI,
 	type ExtensionCommandContext,
@@ -8,7 +9,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { formatTokens, projectTokens, type TokenProjection } from "./accounting";
 import { applyPrunes } from "./apply";
-import { defaultGoal, eligibleCandidates, extractPairs, historyForJudgment } from "./candidates";
+import { defaultGoal, eligibleCandidates, extractPairs, historyForJudgment, PINNED_USER_TURNS, type PinPolicy } from "./candidates";
 import { createPiClassifierAsker, JEV_MODEL, JEV_PROVIDER, judgeCandidates, type RelevanceAsker } from "./judge";
 import {
 	formatCandidates,
@@ -76,6 +77,20 @@ function tokenProjection(ctx: ExtensionContext, messages: Messages, droppedIds: 
 	const measured = applyPrunes(messages, droppedIdsAtBaseline(ctx)) ?? messages;
 	const effective = applyPrunes(messages, droppedIds) ?? messages;
 	return projectTokens(messages, measured, effective, baselineTokens);
+}
+
+/**
+ * Pi's compaction keepRecentTokens for the active model, resolved like Pi does:
+ * per-model override, then the ordinary setting, then Pi's default. Jev never
+ * prunes what native compaction would keep verbatim.
+ */
+function pinPolicy(pi: ExtensionAPI, ctx: ExtensionContext): PinPolicy {
+	const compaction = pi.getSettings().compaction;
+	const modelKey = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
+	const override = modelKey ? compaction?.modelOverrides?.[modelKey]?.keepRecentTokens : undefined;
+	const configured = override ?? compaction?.keepRecentTokens;
+	const recentTokens = isFiniteNonNegative(configured) ? configured : DEFAULT_COMPACTION_SETTINGS.keepRecentTokens!;
+	return { userTurns: PINNED_USER_TURNS, recentTokens };
 }
 
 /** Map a judgment failure to an actionable, bounded notice. Pi's classifier errors carry the HTTP status as `(NNN)`. */
@@ -147,7 +162,8 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 		}
 		runInFlight = true;
 		const messages = messagesForContext(ctx);
-		const candidates = eligibleCandidates(messages, activeDroppedIds);
+		const policy = pinPolicy(pi, ctx);
+		const candidates = eligibleCandidates(messages, activeDroppedIds, policy);
 		const goal = (focus || defaultGoal(messages)).slice(0, GOAL_LIMIT);
 
 		try {
@@ -196,7 +212,7 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 			updateStatus(ctx, messages);
 			const verb = mode === "dry" ? "would drop" : "dropped";
 			const summary = candidates.length === 0
-				? `0 new eligible pairs to judge (recent 6 turns pinned${activeDroppedIds.size > 0 ? `; ${activeDroppedIds.size} earlier pairs already pruned` : ""})`
+				? `0 new eligible pairs to judge (recent ${policy.userTurns} user turns and ~${formatTokens(policy.recentTokens)} tokens pinned${activeDroppedIds.size > 0 ? `; ${activeDroppedIds.size} earlier pairs already pruned` : ""})`
 				: `${verb} ${newlyDroppedIds.length}/${candidates.length} eligible pairs`;
 			notify(ctx, `jev${mode === "dry" ? " dry" : ""}: ${summary} · context ~${formatTokens(run.effectiveTokens)} from ~${formatTokens(run.rawTokens)}`);
 		} catch (error) {

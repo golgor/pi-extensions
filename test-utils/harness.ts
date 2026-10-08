@@ -74,6 +74,7 @@ export async function mountExtension(
 		registerEntryRenderer(customType: string, renderer: any) {
 			entryRenderers[customType] = renderer;
 		},
+		getSettings: () => ({}),
 		...extras,
 	} as unknown as ExtensionAPI;
 
@@ -154,7 +155,7 @@ export function makeContext(options: FakeContextOptions): ExtensionContext {
 		cwd,
 		hasUI,
 		mode: "tui",
-		model: { contextWindow },
+		model: { provider: "test", id: "test", contextWindow },
 		getContextUsage: () => ({ tokens: contextTokens, contextWindow, percent: null }),
 		modelRegistry,
 		sessionManager: {
