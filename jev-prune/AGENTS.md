@@ -5,7 +5,9 @@ Guidance for AI coding agents (including Pi itself) working on this extension.
 ## What this is
 
 A Pi extension (`index.ts`) providing manual `/jev` relevance judgments via
-TypeSafe AI (`@typesafe-ai/sdk`) to prune stale complete tool-call/result pairs
+TypeSafe AI's Jev classifier, called through Pi's classifier API
+(`ctx.modelRegistry.classify`, model `typesafe/jev-latest`; requires Pi 1.1.0),
+to prune stale complete tool-call/result pairs
 from provider context without rewriting Pi session history.
 
 ## Architecture and conventions
@@ -13,8 +15,8 @@ from provider context without rewriting Pi session history.
 - **Deep module layout**:
   - `candidates.ts`: extraction of complete, unambiguous tool-call/result pairs,
     turn pinning (default: 6 user turns), text extraction, and default goal/history builders.
-  - `judge.ts`: bounded TypeSafe state fitting, Noul question construction,
-    deterministic batching, and SDK adapter.
+  - `judge.ts`: bounded TypeSafe state fitting, `bool` question construction,
+    deterministic batching, and the Pi classifier adapter.
   - `apply.ts`: reversible context rewriting, atomic pair removal, and
     assistant text placeholder insertion.
   - `accounting.ts`: single home for all token/size/cost estimation and

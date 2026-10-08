@@ -1,6 +1,10 @@
-import { noul, TypeSafeClient } from "@typesafe-ai/sdk";
-import type { JsonValue } from "@typesafe-ai/sdk";
+import type { ClassifierQuestion, JsonObject } from "@earendil-works/pi-ai";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Candidate } from "./candidates";
+
+/** Pi's built-in direct TypeSafe Jev classifier. */
+export const JEV_PROVIDER = "typesafe";
+export const JEV_MODEL = "jev-latest";
 
 // TypeSafe documents 32k for state + longest question and 64k total. Keep
 // Jev well below those caps because JSON character estimates undercount code,
@@ -26,7 +30,7 @@ export interface AskResponse {
 	usage: { inputTokens: number; outputTokens: number };
 }
 
-/** Internal seam: TypeSafe runtime adapter and deterministic test adapter implement this. */
+/** Internal seam: the Pi classifier adapter and deterministic test adapters implement this. */
 export type RelevanceAsker = (request: AskRequest) => Promise<AskResponse>;
 
 export interface Judgment {
@@ -100,32 +104,41 @@ function batches(goal: string, history: JudgeState["history"], candidates: Candi
 	return batches;
 }
 
-/** Official SDK adapter. It constructs lazily so a missing key never prevents Pi startup. */
-export function createTypeSafeAsker(): RelevanceAsker {
+function question(candidate: Candidate): ClassifierQuestion {
+	return {
+		type: "bool",
+		instructions: questionText(candidate),
+		criteria: {
+			true: "Keep this pair visible because it still contains evidence required to continue the goal correctly.",
+			false: "Drop this complete pair because it is stale; a short purge marker is sufficient.",
+		},
+	};
+}
+
+/**
+ * Runtime adapter over Pi's classifier API. Pi resolves TypeSafe credentials
+ * (TYPESAFE_API_KEY or auth.json) per request, so a missing key never
+ * prevents Pi startup; it surfaces as a failed run.
+ */
+export function createPiClassifierAsker(registry: Pick<ExtensionContext["modelRegistry"], "findOfType" | "classify">): RelevanceAsker {
 	return async ({ state, candidates, signal }) => {
-		const client = new TypeSafeClient({ logLevel: "off" });
-		const questions = Object.fromEntries(
-			candidates.map((candidate) => [
-				candidate.toolCallId,
-				noul(questionText(candidate), {
-					true: "Keep this pair visible because it still contains evidence required to continue the goal correctly.",
-					false: "Drop this complete pair because it is stale; a short purge marker is sufficient.",
-				}),
-			]),
-		);
+		const model = registry.findOfType("classifier", JEV_PROVIDER, JEV_MODEL);
+		if (!model) throw new Error(`Pi has no ${JEV_PROVIDER}/${JEV_MODEL} classifier model`);
+		const questions = Object.fromEntries(candidates.map((candidate) => [candidate.toolCallId, question(candidate)]));
 		// SAFETY: JudgeState is composed only of JSON-compatible strings, booleans, arrays, and records.
-		const response = await client.systemOne({ model: "jev-latest", state: state as unknown as { [key: string]: JsonValue }, questions }, { signal });
+		const result = await registry.classify(model, { state: state as unknown as JsonObject, questions }, { signal });
+		if (result.stopReason !== "stop") {
+			throw new Error(result.errorMessage ?? `Jev classification ${result.stopReason}`);
+		}
 		const probabilities: Record<string, number> = {};
 		for (const candidate of candidates) {
-			const answer = response.answers[candidate.toolCallId];
-			if (!answer || answer.type !== "noul" || !Number.isFinite(answer.noul) || answer.noul < 0 || answer.noul > 1) {
-				throw new Error("Jev returned a malformed answer");
-			}
-			probabilities[candidate.toolCallId] = answer.noul;
+			const answer = result.answers[candidate.toolCallId];
+			if (!answer || answer.type !== "bool") throw new Error("Jev returned a malformed answer");
+			probabilities[candidate.toolCallId] = answer.probability;
 		}
 		return {
 			probabilities,
-			usage: { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens },
+			usage: { inputTokens: result.usage?.input ?? 0, outputTokens: result.usage?.output ?? 0 },
 		};
 	};
 }

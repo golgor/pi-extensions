@@ -28,8 +28,7 @@ they cover (e.g. `fs-guard/index.test.ts`) and double as behavior docs.
 
 `@earendil-works/pi-coding-agent` is a `devDependency` used for types and to
 exercise extension code in tests — at real runtime, Pi itself provides this
-module. `jev-prune` additionally uses the root runtime dependency
-`@typesafe-ai/sdk`; Pi resolves it from this shared root `node_modules`.
+module. There are no runtime dependencies.
 
 ## Extensions
 
@@ -48,7 +47,8 @@ module. `jev-prune` additionally uses the root runtime dependency
   `/jev history`, or open the interactive modal with `/jev view` before
   applying `/jev`. It sends bounded active text, tool inputs, and result
   prefixes to TypeSafe AI; invoke it only when that disclosure is appropriate.
-  Requires `TYPESAFE_API_KEY`.
+  Requires Pi 1.1.0 and TypeSafe credentials (`TYPESAFE_API_KEY` or Pi's
+  `auth.json`).
 
 ## Adding a new extension
 

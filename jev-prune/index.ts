@@ -9,7 +9,7 @@ import {
 import { formatTokens, projectTokens, type TokenProjection } from "./accounting";
 import { applyPrunes } from "./apply";
 import { defaultGoal, eligibleCandidates, extractPairs, historyForJudgment } from "./candidates";
-import { createTypeSafeAsker, judgeCandidates, type RelevanceAsker } from "./judge";
+import { createPiClassifierAsker, JEV_MODEL, JEV_PROVIDER, judgeCandidates, type RelevanceAsker } from "./judge";
 import {
 	formatCandidates,
 	formatRun,
@@ -78,6 +78,27 @@ function tokenProjection(ctx: ExtensionContext, messages: Messages, droppedIds: 
 	return projectTokens(messages, measured, effective, baselineTokens);
 }
 
+/** Map a judgment failure to an actionable, bounded notice. Pi's classifier errors carry the HTTP status as `(NNN)`. */
+function describeFailure(error: unknown): string {
+	const msg = error instanceof Error ? error.message : "";
+	const errorName = error instanceof Error ? error.name : "request error";
+	if (msg.includes(`${JEV_PROVIDER}/${JEV_MODEL} classifier`)) {
+		return `Pi has no ${JEV_PROVIDER}/${JEV_MODEL} classifier model; update Pi`;
+	}
+	if (msg.includes("Provider is not configured") || msg.includes("No API key")) {
+		return "no TypeSafe credentials (set TYPESAFE_API_KEY or add typesafe to Pi's auth.json)";
+	}
+	if (/\((401|403)\)/.test(msg)) return "TypeSafe authentication failed (check TYPESAFE_API_KEY)";
+	if (msg.includes("(429)")) return "TypeSafe rate limit reached; retry shortly";
+	if (msg.includes("state budget") || msg.includes("max_tokens_exceeded") || msg.includes("context length")) {
+		return "TypeSafe request exceeds its context limit; Jev will need smaller batches";
+	}
+	// Defense in depth: Pi sends the key only as a header, but never echo it if a server reflects it.
+	const key = process.env.TYPESAFE_API_KEY;
+	const safeMsg = key ? msg.replaceAll(key, "<redacted>") : msg;
+	return safeMsg ? `${errorName}: ${safeMsg.slice(0, 240)}` : "judgment failed";
+}
+
 function statusText(ctx: ExtensionContext, messages: Messages, activeDroppedIds: ReadonlySet<string>): string | undefined {
 	if (!applyPrunes(messages, activeDroppedIds)) return undefined;
 	const tokens = tokenProjection(ctx, messages, activeDroppedIds);
@@ -86,11 +107,10 @@ function statusText(ctx: ExtensionContext, messages: Messages, activeDroppedIds:
 
 /**
  * Manual, reversible Jev pruning. The optional dependency argument is an
- * internal adapter seam: runtime uses TypeSafe; factory-level tests use a
- * deterministic fake. Pi invokes this with only its ExtensionAPI.
+ * internal adapter seam: runtime uses Pi's classifier API; factory-level tests
+ * may inject a deterministic fake. Pi invokes this with only its ExtensionAPI.
  */
 export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = {}) {
-	const ask = dependencies.ask ?? createTypeSafeAsker();
 	let activeDroppedIds = new Set<string>();
 	let runs: PersistedRun[] = [];
 	let runInFlight = false;
@@ -131,6 +151,7 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 		const goal = (focus || defaultGoal(messages)).slice(0, GOAL_LIMIT);
 
 		try {
+			const ask = dependencies.ask ?? createPiClassifierAsker(ctx.modelRegistry);
 			const judged = await judgeCandidates(goal, historyForJudgment(messages), candidates, ask);
 			const byId = new Map(candidates.map((candidate) => [candidate.toolCallId, candidate]));
 			const diagnostics: PersistedCandidate[] = judged.judgments.map((judgment) => {
@@ -178,22 +199,8 @@ export default function jevPrune(pi: ExtensionAPI, dependencies: Dependencies = 
 				? `0 new eligible pairs to judge (recent 6 turns pinned${activeDroppedIds.size > 0 ? `; ${activeDroppedIds.size} earlier pairs already pruned` : ""})`
 				: `${verb} ${newlyDroppedIds.length}/${candidates.length} eligible pairs`;
 			notify(ctx, `jev${mode === "dry" ? " dry" : ""}: ${summary} · context ~${formatTokens(run.effectiveTokens)} from ~${formatTokens(run.rawTokens)}`);
-		} catch (error: any) {
-			let errorReason = "judgment failed";
-			const msg = typeof error?.message === "string" ? error.message : "";
-			const safeMsg = process.env.TYPESAFE_API_KEY ? msg.replaceAll(process.env.TYPESAFE_API_KEY, "<redacted>") : msg;
-			const errorName = typeof error?.name === "string" ? error.name : "request error";
-			if (!process.env.TYPESAFE_API_KEY || msg.includes("No API key was provided")) {
-				errorReason = "missing TYPESAFE_API_KEY environment variable";
-			} else if (error?.status === 401 || msg.includes("AuthenticationError") || msg.includes("authentication failed")) {
-				errorReason = "TypeSafe authentication failed (check TYPESAFE_API_KEY)";
-			} else if (error?.status === 429 || msg.includes("RateLimitError") || msg.includes("rate limit")) {
-				errorReason = "TypeSafe rate limit reached; retry shortly";
-			} else if (msg.includes("state budget") || msg.includes("max_tokens_exceeded") || msg.includes("context length")) {
-				errorReason = "TypeSafe request exceeds its context limit; Jev will need smaller batches";
-			} else if (safeMsg) {
-				errorReason = `${errorName}: ${safeMsg.slice(0, 240)}`;
-			}
+		} catch (error) {
+			const errorReason = describeFailure(error);
 			notify(ctx, `jev: no changes; ${errorReason}. Existing pruning state is unchanged.`, "error");
 		} finally {
 			runInFlight = false;
