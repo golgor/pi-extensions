@@ -125,6 +125,8 @@ export interface FakeContextOptions {
 	onCustomUI?: (factory: Function, options?: any) => any;
 	/** Fake `ctx.modelRegistry` members (e.g. `findOfType`, `classify`) an extension calls. */
 	modelRegistry?: Partial<ExtensionContext["modelRegistry"]>;
+	/** Captures factories passed to `ctx.ui.addAutocompleteProvider`. */
+	autocompleteProviders?: Array<Parameters<ExtensionContext["ui"]["addAutocompleteProvider"]>[0]>;
 }
 
 /** Builds a minimal fake `ExtensionContext` with branch-backed session reads. */
@@ -140,6 +142,7 @@ export function makeContext(options: FakeContextOptions): ExtensionContext {
 		notifications = [],
 		onCustomUI,
 		modelRegistry = {},
+		autocompleteProviders = [],
 	} = options;
 
 	const theme = {
@@ -169,6 +172,7 @@ export function makeContext(options: FakeContextOptions): ExtensionContext {
 			confirm: async () => confirm,
 			notify: (message: string, type?: string) => notifications.push({ message, type }),
 			setStatus: (key: string, text: string | undefined) => statuses.set(key, text),
+			addAutocompleteProvider: (factory: any) => autocompleteProviders.push(factory),
 			custom: async (factoryOrOptions: any, maybeOptions?: any) => {
 				const factory = typeof factoryOrOptions === "function" ? factoryOrOptions : maybeOptions;
 				const opts = typeof factoryOrOptions === "function" ? maybeOptions : factoryOrOptions;
