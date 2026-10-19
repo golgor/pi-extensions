@@ -49,6 +49,12 @@ module. There are no runtime dependencies.
   prefixes to TypeSafe AI; invoke it only when that disclosure is appropriate.
   Requires Pi 1.1.0 and TypeSafe credentials (`TYPESAFE_API_KEY` or Pi's
   `auth.json`).
+- [`references/`](./references) — named directory shortcuts in `@` completion,
+  like OpenCode's "references". Define them in `~/.pi/agent/references.json`:
+  `{ "dotfiles": { "path": "~/.dotfiles", "description": "Personal dotfiles" } }`.
+  Typing `@dot` offers `dotfiles/`; picking it inserts `@~/.dotfiles/` and
+  normal path completion continues from there. Reloaded on each session start.
+  See `references/CONTEXT.md`.
 
 ## Adding a new extension
 
